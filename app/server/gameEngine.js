@@ -60,6 +60,14 @@ export class GameEngine {
     this.tickMotivation();
     const totalSalary = Object.values(this.room.players).reduce((s, p) => s + (p.salary || 0), 0);
     this.state = tickState(this.state, Object.keys(this.room.players).length, totalSalary);
+    // Prune expired synergy buffs
+    if (this.state.activeBuffs) {
+      const live = {};
+      for (const [id, expires] of Object.entries(this.state.activeBuffs)) {
+        if (expires > this.state.tick) live[id] = expires;
+      }
+      this.state = { ...this.state, activeBuffs: live };
+    }
     this.checkObjectives();
     this.checkPhaseMilestone();
     this.runBots();
@@ -93,10 +101,19 @@ export class GameEngine {
       const event = EVENTS[eventId];
       if (event) {
         const newMetrics = { ...this.state.metrics };
-        for (const [metric, delta] of Object.entries(event.effects)) {
+        for (const [metric, delta] of Object.entries(event.effects || {})) {
           if (newMetrics[metric] === undefined) continue;
           const config = METRICS_CONFIG[metric];
           newMetrics[metric] = Math.max(config.min, Math.min(config.max, newMetrics[metric] + delta));
+        }
+        // Percentage damage scales with current metric value — bigger company,
+        // bigger absolute hit. Combined with the flat `effects`, a small startup
+        // can still be wiped out by a single bad event.
+        for (const [metric, pct] of Object.entries(event.pctEffects || {})) {
+          if (newMetrics[metric] === undefined) continue;
+          const config = METRICS_CONFIG[metric];
+          const change = Math.round(newMetrics[metric] * pct);
+          newMetrics[metric] = Math.max(config.min, Math.min(config.max, newMetrics[metric] + change));
         }
         const newEvent = {
           ...event, startTick: this.state.tick,
@@ -238,14 +255,29 @@ export class GameEngine {
     this.state = applied.state;
     const outcome = applied.outcome;
 
+    // Grant synergy buff (foundation work leaves something behind for teammates)
+    if (action.grantsBuff) {
+      const expiresAt = this.state.tick + action.grantsBuff.ticks;
+      const buffs = { ...(this.state.activeBuffs || {}) };
+      buffs[action.grantsBuff.id] = Math.max(buffs[action.grantsBuff.id] || 0, expiresAt);
+      this.state = { ...this.state, activeBuffs: buffs };
+    }
+
     let duration = action.cooldown;
     if (this.state.upgrades.includes('cicdPipeline')) {
       duration = Math.max(1, Math.ceil(duration * 0.8));
     }
-    // Motivation also scales duration: 100 mot → 1.0×, 0 mot → 1.6× slower
+    // Motivation scales duration: 100 mot → 1.0×, 0 mot → 1.6× slower
     const mot = player.motivation || 70;
     const motMul = 1 + (1 - mot / 100) * 0.6;
-    duration = Math.max(1, Math.ceil(duration * motMul));
+    // Happiness scales duration too: a happy team works faster.
+    // 100 happiness → 0.85×, 50 → 1.0×, 0 → 1.15×.
+    const hap = this.state.metrics.happiness ?? 50;
+    const hapMul = 1 - ((hap - 50) / 100) * 0.3;
+    // Aligned buff (sprint planning) shaves another 15% — proper planning pays off.
+    const aligned = (this.state.activeBuffs?.aligned || 0) > this.state.tick;
+    const alignMul = aligned ? 0.85 : 1.0;
+    duration = Math.max(1, Math.ceil(duration * motMul * hapMul * alignMul));
     player.busyUntil = this.state.tick + duration;
     player.busyAction = actionId;
     player.busyTotal = duration;
@@ -299,7 +331,9 @@ export class GameEngine {
       this.io.to(this.room.code).emit('game:actionOutcome', {
         playerId: socketId, playerName: player.name,
         actionName: action.name, actionEmoji: action.emoji,
-        result: outcome.result, hadBug: outcome.hadBug, tick: this.state.tick,
+        result: outcome.result, hadBug: outcome.hadBug,
+        synergyMul: outcome.synergyMul, usedBuffs: outcome.usedBuffs,
+        tick: this.state.tick,
       });
     }
 
@@ -424,6 +458,9 @@ export class GameEngine {
       const ready = (id) => {
         const a = ACTIONS[id];
         if (!a) return false;
+        // Pitching to investors is a player-only decision — bots must never
+        // launch the company on their teammates' behalf.
+        if (a.launchesGame) return false;
         if (a.roleLock && a.roleLock !== p.role) return false;
         if (this.state.phase === 'idea' && a.phase !== 'idea') return false;
         if (this.state.phase !== 'idea' && a.phase === 'idea') return false;
@@ -456,6 +493,15 @@ export class GameEngine {
   tickMotivation() {
     // Motivation drifts toward target = (salary − default) mapped to 30..100.
     // Below default → toward low morale. Above default → toward enthused.
+    // No salaries are paid during the idea phase, so no motivation should
+    // accrue from them either — otherwise the slider is a free buff.
+    if (this.state.phase === 'idea') {
+      for (const p of Object.values(this.room.players)) {
+        if (p.salary === undefined) p.salary = GAME_CONFIG.SALARY_DEFAULT;
+        if (p.motivation === undefined) p.motivation = 70;
+      }
+      return;
+    }
     for (const p of Object.values(this.room.players)) {
       if (p.salary === undefined) p.salary = GAME_CONFIG.SALARY_DEFAULT;
       if (p.motivation === undefined) p.motivation = 70;
@@ -517,6 +563,7 @@ export class GameEngine {
       preparationPoints: this.state.preparationPoints || 0,
       fundingRaised: this.state.fundingRaised || 0,
       actionCounts: this.state.actionCounts || {},
+      activeBuffs: this.state.activeBuffs || {},
       milestone: (() => {
         const ms = PHASE_MILESTONES[this.state.phase];
         if (!ms) return null;

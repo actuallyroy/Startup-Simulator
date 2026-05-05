@@ -24,6 +24,7 @@ export function createInitialState(gameType = null, gameSubtype = null) {
     actionCounts: {},   // team-wide use count per action id
     preparationPoints: 0, // earned during idea phase, drives pitch funding
     fundingRaised: 0,
+    activeBuffs: {}, // { buffId: expiresTick } — synergy buffs left by foundation work
   };
 }
 
@@ -51,13 +52,37 @@ export function applyAction(state, actionId, playerId, playerRole, upgrades, mot
   else if (roll < successChance)   { result = 'success';  posMul = 1.0 * roleMul; negMul = 1.0; }
   else                             { result = 'failure';  posMul = 0.3 * roleMul; negMul = 1.5; }
 
+  // Synergy: if foundation buffs are active and this action declares
+  // amplifiedBy entries that match, multiply positive deltas. Multiplicative
+  // stacking, capped at 2.5× so a chain of buffs can't go infinite.
+  let synergyMul = 1.0;
+  const usedBuffs = [];
+  if (action.amplifiedBy) {
+    for (const [buffId, mult] of Object.entries(action.amplifiedBy)) {
+      const expires = state.activeBuffs?.[buffId];
+      if (expires && expires > state.tick) {
+        synergyMul *= mult;
+        usedBuffs.push(buffId);
+      }
+    }
+    if (synergyMul > 2.5) synergyMul = 2.5;
+  }
+  posMul *= synergyMul;
+
   const newMetrics = { ...state.metrics };
   for (const [metric, delta] of Object.entries(action.effects)) {
     if (newMetrics[metric] === undefined) continue;
     // Positive vs negative is metric-aware: errors/latency growing is bad.
     const isBadMetric = metric === 'errors' || metric === 'latency';
     const isBeneficial = isBadMetric ? delta < 0 : delta > 0;
-    let effectiveDelta = delta * (isBeneficial ? posMul : negMul);
+    // Magnitude roll: listed value is the cap, real result is ramp(0..1) ** 1.5.
+    // That skews outcomes toward lower numbers — hitting the listed maximum is rare.
+    // Failures floor the roll to keep them stinging; criticals always max out.
+    let mag;
+    if (result === 'critical') mag = 1.0;
+    else if (result === 'failure') mag = 0.2 + 0.3 * Math.random();
+    else mag = Math.random() ** 1.5;
+    let effectiveDelta = delta * mag * (isBeneficial ? posMul : negMul);
     if (upgrades.includes('qaTeam') && actionId === 'shipFeature' && metric === 'errors' && delta > 0) {
       effectiveDelta = 0;
     }
@@ -66,9 +91,12 @@ export function applyAction(state, actionId, playerId, playerRole, upgrades, mot
   }
 
   // Independent bug roll for risky actions; motivation lowers the chance.
+  // Active 'tests' buff cuts bug risk in half — that's why writing tests matters.
   let hadBug = false;
   if (action.bugRisk && !(upgrades.includes('qaTeam') && actionId === 'shipFeature')) {
-    const adjBugChance = Math.max(0.05, action.bugRisk - (motivation - 50) / 200);
+    const testsActive = (state.activeBuffs?.tests || 0) > state.tick;
+    const baseBugRisk = action.bugRisk * (testsActive ? 0.5 : 1.0);
+    const adjBugChance = Math.max(0.03, baseBugRisk - (motivation - 50) / 200);
     if (Math.random() < adjBugChance) {
       hadBug = true;
       const cfg = METRICS_CONFIG.errors;
@@ -80,18 +108,28 @@ export function applyAction(state, actionId, playerId, playerRole, upgrades, mot
     newMetrics.latency = Math.min(500, newMetrics.latency);
   }
 
-  return { state: { ...state, metrics: newMetrics }, outcome: { result, hadBug, hasRoleBonus } };
+  return { state: { ...state, metrics: newMetrics }, outcome: { result, hadBug, hasRoleBonus, synergyMul, usedBuffs } };
 }
 
 // Event response effects map
 const EVENT_RESPONSE_EFFECTS = {
-  trafficSpike: { latency: -80, users: 50 },
-  serviceCrash: { errors: -20, latency: -300 },
-  bugInjection: { errors: -15, happiness: 3 },
-  ddosAttack: { latency: -600, errors: -10 },
+  trafficSpike: { latency: -80, users: 50, revenue: -20 },
+  serviceCrash: { errors: -20, latency: -300, revenue: -50 },
+  bugInjection: { errors: -15, happiness: 3, revenue: -20 },
+  ddosAttack: { latency: -600, errors: -10, revenue: -30 },
   viralMoment: { users: 300, revenue: 40 },
-  dataLeak: { happiness: 20, users: 50, errors: -5 },
+  dataLeak: { happiness: 20, users: 50, errors: -5, revenue: -80 },
   techBlogFeature: { users: 200, revenue: 30 },
+};
+
+// Percentage-of-revenue cost on top of the flat hit. Tiny startup gets dinged
+// a sliver, scaled-up company pays real money to fight fires.
+const EVENT_RESPONSE_PCT = {
+  trafficSpike: { revenue: -0.04 },
+  serviceCrash: { revenue: -0.10 },
+  bugInjection: { revenue: -0.04 },
+  ddosAttack:   { revenue: -0.06 },
+  dataLeak:     { revenue: -0.12 },
 };
 
 export function applyEventResponseClean(state, eventId) {
@@ -103,6 +141,16 @@ export function applyEventResponseClean(state, eventId) {
     if (newMetrics[metric] === undefined) continue;
     const config = METRICS_CONFIG[metric];
     newMetrics[metric] = Math.max(config.min, Math.min(config.max, newMetrics[metric] + delta));
+  }
+  // Percentage costs scale with current value of the metric.
+  const pct = EVENT_RESPONSE_PCT[eventId];
+  if (pct) {
+    for (const [metric, p] of Object.entries(pct)) {
+      if (newMetrics[metric] === undefined) continue;
+      const config = METRICS_CONFIG[metric];
+      const change = Math.round(newMetrics[metric] * p);
+      newMetrics[metric] = Math.max(config.min, Math.min(config.max, newMetrics[metric] + change));
+    }
   }
 
   const activeEvents = state.activeEvents.map(e =>
@@ -174,6 +222,14 @@ export function tickState(state, playerCount = 1, totalSalary = 0) {
 
   // Cross-metric effects
   if (newMetrics.errors > 50) newMetrics.latency = Math.min(METRICS_CONFIG.latency.max, newMetrics.latency + 5);
+  // Bugs churn users: above the 20-error tolerance threshold, you lose a
+  // fraction of your user base per tick. Scales with both error count and
+  // current users — small startups bleed a few, big ones hemorrhage.
+  if (newMetrics.errors > 20 && state.phase !== 'idea') {
+    const churnPct = ((newMetrics.errors - 20) / 100) * 0.025;
+    const churn = Math.ceil(newMetrics.users * churnPct);
+    newMetrics.users = Math.max(METRICS_CONFIG.users.min, newMetrics.users - churn);
+  }
   if (newMetrics.latency > 200) newMetrics.happiness = Math.max(METRICS_CONFIG.happiness.min, newMetrics.happiness - 1);
   if (upgrades.includes('autoScaling')) newMetrics.latency = Math.min(500, newMetrics.latency);
 

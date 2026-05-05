@@ -233,23 +233,27 @@ export const ACTIONS = {
   // ── ENGINEERING ──
   fixBug: {
     id: 'fixBug', name: 'Fix Bug', emoji: '🐛', cooldown: 3, category: 'engineering',
-    description: 'Squash a critical bug in the codebase',
+    description: 'Squash a critical bug. Buff: stable platform (10t)',
     effects: { errors: -15 },
+    grantsBuff: { id: 'stable', ticks: 10 },
   },
   optimizeApi: {
     id: 'optimizeApi', name: 'Optimize API', emoji: '⚡', cooldown: 3, category: 'engineering',
-    description: 'Tune database queries and API endpoints',
+    description: 'Tune queries & endpoints. Buff: infra ready (12t)',
     effects: { latency: -50, errors: -5 },
+    grantsBuff: { id: 'infra', ticks: 12 },
   },
   codeReview: {
     id: 'codeReview', name: 'Code Review', emoji: '🔍', cooldown: 4, category: 'engineering',
-    description: 'Review PRs to catch bugs before they ship',
+    description: 'Review PRs. Buff: reviewed code (12t)',
     effects: { errors: -8, happiness: 3 },
+    grantsBuff: { id: 'reviewed', ticks: 12 },
   },
   writeTests: {
     id: 'writeTests', name: 'Write Tests', emoji: '🧪', cooldown: 5, category: 'engineering',
-    description: 'Add automated tests to prevent regressions',
+    description: 'Add automated tests. Buff: tested (20t)',
     effects: { errors: -12, latency: -10 },
+    grantsBuff: { id: 'tests', ticks: 20 },
   },
   refactorCode: {
     id: 'refactorCode', name: 'Refactor', emoji: '♻️', cooldown: 6, category: 'engineering',
@@ -264,53 +268,62 @@ export const ACTIONS = {
     description: 'Launch a new feature to attract users (dev cost: $80, bug risk!)',
     effects: { users: 80, errors: 3, revenue: -80 },
     motivationFloor: 50, bugRisk: 0.4, bugErrors: 12,
+    amplifiedBy: { tests: 1.4, reviewed: 1.3, infra: 1.2 },
   },
   improveUx: {
     id: 'improveUx', name: 'Improve UX', emoji: '✨', cooldown: 3, category: 'product',
     description: 'Polish the experience (cost: $40)',
     effects: { happiness: 12, users: 25, revenue: -40 },
+    amplifiedBy: { tests: 1.2, reviewed: 1.2 },
   },
   abTest: {
     id: 'abTest', name: 'A/B Test', emoji: '🔬', cooldown: 5, category: 'product',
     description: 'Experiment to optimize conversion (cost: $60)',
     effects: { users: 40, revenue: -60 },
     motivationFloor: 50,
+    amplifiedBy: { monitor: 1.5, infra: 1.2 },
   },
   darkMode: {
     id: 'darkMode', name: 'Dark Mode', emoji: '🌙', cooldown: 6, category: 'product',
     description: 'Add dark mode — users love it! (cost: $50)',
     effects: { happiness: 15, users: 60, revenue: -50 },
     motivationFloor: 50,
+    amplifiedBy: { reviewed: 1.3, tests: 1.2 },
   },
   mobileOptimize: {
     id: 'mobileOptimize', name: 'Mobile Optimize', emoji: '📱', cooldown: 5, category: 'product',
-    description: 'Optimize for mobile (cost: $100, bug risk)',
+    description: 'Optimize for mobile (cost: $100, bug risk). Synergy: Scale + Cache.',
     effects: { users: 100, happiness: 8, latency: -20, revenue: -100 },
     motivationFloor: 55, bugRisk: 0.3, bugErrors: 8,
+    amplifiedBy: { infra: 1.5, cache: 1.3, tests: 1.2 },
   },
 
   // ── INFRASTRUCTURE ──
   scaleInfra: {
     id: 'scaleInfra', name: 'Scale Servers', emoji: '📈', cooldown: 4, category: 'infrastructure',
-    description: 'Add more server capacity',
+    description: 'Add server capacity. Buff: infra ready (15t)',
     effects: { latency: -120, revenue: -10 },
+    grantsBuff: { id: 'infra', ticks: 15 },
   },
   addCache: {
     id: 'addCache', name: 'Add Cache', emoji: '💾', cooldown: 5, category: 'infrastructure',
-    description: 'Add Redis caching layer',
+    description: 'Add Redis layer. Buff: cached (15t)',
     effects: { latency: -80, errors: -3 },
+    grantsBuff: { id: 'cache', ticks: 15 },
   },
   setupCiCd: {
     id: 'setupCiCd', name: 'Setup CI/CD', emoji: '🔄', cooldown: 7, category: 'infrastructure',
-    description: 'Automate deployments — faster shipping',
+    description: 'Automate deploys. Buff: tests + reviewed (15t)',
     effects: { errors: -10, happiness: 5 },
     motivationFloor: 55,
+    grantsBuff: { id: 'tests', ticks: 15 },
   },
   addMonitoring: {
     id: 'addMonitoring', name: 'Add Monitoring', emoji: '📊', cooldown: 6, category: 'infrastructure',
-    description: 'Set up alerts and dashboards',
+    description: 'Alerts & dashboards. Buff: observed (20t)',
     effects: { errors: -8, latency: -20 },
     motivationFloor: 50,
+    grantsBuff: { id: 'monitor', ticks: 20 },
   },
   rollback: {
     id: 'rollback', name: 'Rollback Deploy', emoji: '⏪', cooldown: 2, category: 'emergency',
@@ -331,21 +344,24 @@ export const ACTIONS = {
   },
   runSprint: {
     id: 'runSprint', name: 'Sprint Planning', emoji: '📝', cooldown: 7, category: 'team',
-    description: 'Organize priorities and boost efficiency',
+    description: 'Organize priorities. Buff: aligned (15t)',
     effects: { happiness: 10, errors: -5 },
     motivationFloor: 40,
+    grantsBuff: { id: 'aligned', ticks: 15 },
   },
   allNighter: {
     id: 'allNighter', name: 'All-Nighter', emoji: '🌃', cooldown: 8, category: 'team',
-    description: 'Pull an all-nighter — big output, morale hit, bug risk',
+    description: 'All-nighter — big output, morale hit, bug risk',
     effects: { users: 120, errors: 10, happiness: -15, latency: -40 },
     motivationFloor: 80, bugRisk: 0.5, bugErrors: 15,
+    amplifiedBy: { aligned: 1.3, tests: 1.2 },
   },
   hackathon: {
     id: 'hackathon', name: 'Hackathon', emoji: '💡', cooldown: 8, category: 'team',
     description: '24hr innovation sprint — wild results, pricey, bug risk',
     effects: { users: 80, revenue: -100, errors: 8, happiness: 10 },
     motivationFloor: 70, bugRisk: 0.4, bugErrors: 10,
+    amplifiedBy: { aligned: 1.3, infra: 1.2 },
   },
 
   // ── EMERGENCY ──
@@ -375,9 +391,10 @@ export const ACTIONS = {
   // ── STRATEGY ──
   boostFeature: {
     id: 'boostFeature', name: 'Marketing Push', emoji: '📣', cooldown: 5, category: 'strategy',
-    description: 'Run ads and social campaigns — pricey but moves the needle',
+    description: 'Ads & social. Synergy: stable + infra (or you flame out)',
     effects: { users: 150, revenue: -180 },
     motivationFloor: 50,
+    amplifiedBy: { stable: 1.4, infra: 1.3, monitor: 1.2 },
   },
   reduceChaos: {
     id: 'reduceChaos', name: 'Stabilize', emoji: '🧘', cooldown: 4, category: 'strategy',
@@ -425,55 +442,68 @@ export const ACTIONS = {
 };
 
 export const EVENTS = {
+  // effects = flat damage (always applied — keeps small startups vulnerable).
+  // pctEffects = additional fraction of the current metric value, applied on top.
+  // The combo means a 100-user company gets killed by the flat term, and a
+  // 5,000-user company gets clobbered by the percentage term.
   trafficSpike: {
     id: 'trafficSpike', name: 'Traffic Spike! 📈',
     description: 'A viral post is driving massive traffic!',
-    severity: 'warning', effects: { users: 200, latency: 100 }, duration: 10,
+    severity: 'warning', effects: { users: 100, latency: 120 },
+    pctEffects: { users: 0.06 }, duration: 10,
   },
   serviceCrash: {
     id: 'serviceCrash', name: 'Service Crash! 💀',
-    description: 'The main service just went down!',
-    severity: 'critical', effects: { errors: 30, latency: 500, happiness: -15 }, duration: 15,
+    description: 'The main service just went down — users are bouncing!',
+    severity: 'critical', effects: { errors: 30, latency: 500, happiness: -15, users: -50 },
+    pctEffects: { users: -0.08 }, duration: 15,
   },
   bugInjection: {
     id: 'bugInjection', name: 'Bug Swarm! 🐛',
     description: 'A bad deploy introduced a wave of bugs!',
-    severity: 'warning', effects: { errors: 20, happiness: -5 }, duration: 8,
+    severity: 'warning', effects: { errors: 22, happiness: -8 }, duration: 8,
   },
   badReviews: {
     id: 'badReviews', name: 'Bad Reviews! ⭐',
     description: 'Reviews are already public. The damage is done.',
-    severity: 'warning', effects: { happiness: -25, users: -80 }, duration: 12,
+    severity: 'warning', effects: { happiness: -25, users: -60 },
+    pctEffects: { users: -0.10 }, duration: 12,
   },
   costSurge: {
     id: 'costSurge', name: 'Cost Surge! 💸',
     description: 'Cloud bill spiked. You signed the contract — pay up.',
-    severity: 'warning', effects: { revenue: -180 }, duration: 10,
+    severity: 'warning', effects: { revenue: -100 },
+    pctEffects: { revenue: -0.15 }, duration: 10,
   },
   ddosAttack: {
     id: 'ddosAttack', name: 'DDoS Attack! 🛡️',
     description: 'Someone is flooding your servers!',
-    severity: 'critical', effects: { latency: 800, errors: 15, users: -30 }, duration: 12,
+    severity: 'critical', effects: { latency: 800, errors: 15, users: -30 },
+    pctEffects: { users: -0.05 }, duration: 12,
   },
   viralMoment: {
     id: 'viralMoment', name: 'Viral Moment! 🎉',
     description: 'An influencer mentioned your product!',
-    severity: 'info', effects: { users: 500, latency: 50 }, duration: 8,
+    severity: 'info', effects: { users: 200, latency: 50 },
+    pctEffects: { users: 0.15 }, duration: 8,
   },
   dataLeak: {
     id: 'dataLeak', name: 'Data Leak! 🔓',
     description: 'User data was exposed in a breach!',
-    severity: 'critical', effects: { happiness: -30, users: -100, errors: 10 }, duration: 15,
+    severity: 'critical', effects: { happiness: -30, errors: 10, users: -100 },
+    pctEffects: { users: -0.15 }, duration: 15,
   },
   competitorLaunch: {
     id: 'competitorLaunch', name: 'Competitor Launch! ⚔️',
     description: 'A rival shipped what you were building. The market shifted.',
-    severity: 'warning', effects: { users: -130, happiness: -15 }, duration: 20,
+    severity: 'warning', effects: { happiness: -15, users: -100 },
+    pctEffects: { users: -0.20 }, duration: 20,
   },
   techBlogFeature: {
     id: 'techBlogFeature', name: 'TechCrunch Feature! 📰',
     description: 'A major tech blog wrote about you!',
-    severity: 'info', effects: { users: 300, revenue: 50 }, duration: 10,
+    severity: 'info', effects: { users: 150, revenue: 50 },
+    pctEffects: { users: 0.10 }, duration: 10,
   },
 };
 
@@ -572,14 +602,15 @@ export const OBJECTIVES_POOL = [
 
 // ── EVENT RESPONSES ──
 export const EVENT_RESPONSES = {
-  trafficSpike: { label: '📈 Scale Up', effects: { latency: -80, users: 50 }, description: 'Spin up extra capacity' },
-  serviceCrash: { label: '🔧 Emergency Fix', effects: { errors: -20, latency: -300 }, description: 'All hands on deck' },
-  bugInjection: { label: '🐛 Bug Sweep', effects: { errors: -15, happiness: 3 }, description: 'Rapid triage' },
   // badReviews: unavoidable — reviews are already public.
   // costSurge: unavoidable — invoice already due.
-  ddosAttack: { label: '🛡️ Activate Shield', effects: { latency: -600, errors: -10 }, description: 'Enable DDoS protection' },
+  // Costs are flat + percentage of cash — tiny startups ride out cheap, scaled cos pay real money.
+  trafficSpike: { label: '📈 Scale Up', effects: { latency: -80, users: 50, revenue: -20 }, pctCost: 0.04, description: 'Spin up capacity ($20 + 4% cash)' },
+  serviceCrash: { label: '🔧 Emergency Fix', effects: { errors: -20, latency: -300, revenue: -50 }, pctCost: 0.10, description: 'All hands on deck ($50 + 10% cash)' },
+  bugInjection: { label: '🐛 Bug Sweep', effects: { errors: -15, happiness: 3, revenue: -20 }, pctCost: 0.04, description: 'Rapid triage ($20 + 4% cash)' },
+  ddosAttack: { label: '🛡️ Activate Shield', effects: { latency: -600, errors: -10, revenue: -30 }, pctCost: 0.06, description: 'DDoS protection ($30 + 6% cash)' },
   viralMoment: { label: '🎯 Capitalize', effects: { users: 300, revenue: 40 }, description: 'Double down on the moment' },
-  dataLeak: { label: '🔒 Incident Response', effects: { happiness: 20, users: 50, errors: -5 }, description: 'Transparent disclosure' },
+  dataLeak: { label: '🔒 Incident Response', effects: { happiness: 20, users: 50, errors: -5, revenue: -80 }, pctCost: 0.12, description: 'Transparent disclosure ($80 + 12% cash)' },
   // competitorLaunch: unavoidable — they already shipped.
   techBlogFeature: { label: '📣 Amplify', effects: { users: 200, revenue: 30 }, description: 'Share it everywhere' },
 };

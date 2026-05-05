@@ -5,15 +5,27 @@ import { useSocket } from '../hooks/useSocket';
 import { useGameStore } from '../hooks/useGameState';
 import { ACTIONS, ACTION_CATEGORIES, ROLE_BONUSES, GAME_CONFIG, METRICS_CONFIG, IDEA_CATEGORIES } from '../lib/gameConfig';
 
-// Format an effect delta for display: "👥 +80", "🐛 −15", "💰 −$10".
+// Format an effect delta for display: "👥 ≤+80", "🐛 ≤−15", "💰 ≤−$10".
+// Listed values are caps now — actual rolls are usually lower.
 function formatEffect(metric, delta) {
   const cfg = METRICS_CONFIG[metric];
   if (!cfg) return null;
   const sign = delta > 0 ? '+' : '−';
   const abs = Math.abs(delta);
   const value = cfg.unit === '$' ? `$${abs}` : cfg.unit === 'ms' ? `${abs}ms` : cfg.unit === '%' ? `${abs}%` : abs;
-  return { emoji: cfg.emoji, label: `${sign}${value}`, isGood: isPositive(metric, delta) };
+  return { emoji: cfg.emoji, label: `≤${sign}${value}`, isGood: isPositive(metric, delta), raw: delta };
 }
+
+// Buff display metadata
+const BUFF_META = {
+  stable:   { emoji: '🛡', name: 'Stable' },
+  infra:    { emoji: '📈', name: 'Infra' },
+  cache:    { emoji: '💾', name: 'Cache' },
+  reviewed: { emoji: '🔍', name: 'Reviewed' },
+  tests:    { emoji: '🧪', name: 'Tests' },
+  monitor:  { emoji: '📊', name: 'Monitor' },
+  aligned:  { emoji: '🎯', name: 'Aligned' },
+};
 
 // "Good" depends on the metric — fewer errors/latency is good.
 function isPositive(metric, delta) {
@@ -27,7 +39,7 @@ export default function ActionPanel() {
     roomCode, myRole, myActionsUsed, setNotification,
     activeActionTab, setActiveActionTab, players, socketId,
     myBusyRemaining, myBusyTotal, myBusyAction, phase, actionCounts,
-    myMotivation, mySalary, preparationPoints,
+    myMotivation, mySalary, preparationPoints, activeBuffs, tick,
   } = useGameStore();
   const [delegateMode, setDelegateMode] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -109,6 +121,22 @@ export default function ActionPanel() {
           ⚙️ {myActionsUsed}/{GAME_CONFIG.MAX_ACTIONS_PER_ROUND}
         </span>
       </div>
+      {/* Active synergy buffs strip — what foundation work is currently active */}
+      {!ideaPhase && activeBuffs && Object.keys(activeBuffs).length > 0 && (
+        <div className="buffs-strip" title="Active synergy buffs from your team">
+          <span className="buffs-label">🔗 Active:</span>
+          {Object.entries(activeBuffs).map(([id, expires]) => {
+            const meta = BUFF_META[id] || { emoji: '✨', name: id };
+            const remaining = Math.max(0, (expires || 0) - (tick || 0));
+            return (
+              <span key={id} className="buff-pill">
+                {meta.emoji} {meta.name} <span className="buff-ttl">{remaining}t</span>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
       {ideaPhase && (
         <div className="prep-banner">
           <span className="prep-pill">💡 Pre-Launch — work on Product / Research / Pitch, then pitch investors</span>
@@ -154,9 +182,25 @@ export default function ActionPanel() {
           const motLocked = action.motivationFloor && myMotivation < action.motivationFloor;
           const disabled = locked || isBusy || maxedOut || exhausted || motLocked;
           const hasBonus = roleBonusActions.includes(action.id);
-          // Adjusted duration based on motivation
+          // Mirror server-side duration math (motivation × happiness × aligned buff)
           const motMul = 1 + (1 - myMotivation / 100) * 0.6;
-          const adjDuration = Math.max(1, Math.ceil(action.cooldown * motMul));
+          const happiness = useGameStore.getState().metrics?.happiness ?? 50;
+          const hapMul = 1 - ((happiness - 50) / 100) * 0.3;
+          const alignActive = (activeBuffs?.aligned || 0) > (tick || 0);
+          const alignMul = alignActive ? 0.85 : 1.0;
+          const adjDuration = Math.max(1, Math.ceil(action.cooldown * motMul * hapMul * alignMul));
+          // Compute live synergy multiplier from currently active buffs
+          let synergyMul = 1.0;
+          const matchedBuffs = [];
+          if (action.amplifiedBy && activeBuffs) {
+            for (const [buffId, mult] of Object.entries(action.amplifiedBy)) {
+              if ((activeBuffs[buffId] || 0) > (tick || 0)) {
+                synergyMul *= mult;
+                matchedBuffs.push(buffId);
+              }
+            }
+            if (synergyMul > 2.5) synergyMul = 2.5;
+          }
 
           // Effect chips, sorted: positives first, negatives last
           const effectChips = Object.entries(action.effects || {})
@@ -191,6 +235,11 @@ export default function ActionPanel() {
                     </span>
                   ))}
                 </div>
+                {synergyMul > 1.05 && !locked && (
+                  <span className="synergy-badge" title={`Synergy from: ${matchedBuffs.join(', ')}`}>
+                    🔗 ×{synergyMul.toFixed(2)}
+                  </span>
+                )}
                 {hasBonus && !locked && <span className="bonus-badge">1.5x</span>}
                 {locked && <span className="lock-badge">🔒 {action.roleLock.toUpperCase()}</span>}
                 {motLocked && !locked && <span className="lock-badge mot-lock">😐 {action.motivationFloor}+ MOT</span>}

@@ -91,7 +91,7 @@ export function useSocket() {
     });
 
     // Action outcome (probability roll result)
-    socket.on('game:actionOutcome', ({ playerName, actionName, actionEmoji, result, hadBug }) => {
+    socket.on('game:actionOutcome', ({ playerName, actionName, actionEmoji, result, hadBug, synergyMul, usedBuffs }) => {
       const myId = useGameStore.getState().socketId;
       // Only toast notable outcomes — successes are the default and would spam.
       if (result === 'critical') {
@@ -101,6 +101,12 @@ export function useSocket() {
       }
       if (hadBug) {
         addActionToast({ message: `🐞 Bugs introduced by ${actionName}!`, type: 'error' });
+      }
+      if (synergyMul && synergyMul > 1.05 && usedBuffs?.length) {
+        addActionToast({
+          message: `🔗 Synergy ×${synergyMul.toFixed(2)}: ${actionName} + ${usedBuffs.join(', ')}`,
+          type: 'success',
+        });
       }
     });
 

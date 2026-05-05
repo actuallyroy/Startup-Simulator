@@ -15,6 +15,7 @@ export const useGameStore = create((set, get) => ({
   milestone: null, winCondition: null, lastBurn: 0, lastIncome: 0, arpu: 0, endReason: null,
   preparationPoints: 0, fundingRaised: 0,
   actionCounts: {},
+  activeBuffs: {},
   // New systems
   upgrades: [], objectives: [], objectivesCompleted: 0, bonusScore: 0,
   pendingDelegation: null, // incoming delegation request
@@ -66,6 +67,7 @@ export const useGameStore = create((set, get) => ({
       preparationPoints: gs.preparationPoints || 0,
       fundingRaised: gs.fundingRaised || 0,
       actionCounts: gs.actionCounts || {},
+      activeBuffs: gs.activeBuffs || {},
       myActionsUsed: myPlayer?.actionsUsed || 0,
       myBusyRemaining: myPlayer?.busyRemaining || 0,
       myBusyTotal: myPlayer?.busyTotal || 0,
