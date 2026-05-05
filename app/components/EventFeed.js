@@ -1,74 +1,162 @@
 'use client';
 
-import { useRef, useEffect } from 'react';
+import { useState } from 'react';
+import { useSocket } from '../hooks/useSocket';
 import { useGameStore } from '../hooks/useGameState';
-import { ROLES } from '../lib/gameConfig';
+import { UPGRADES, EVENT_RESPONSES } from '../lib/gameConfig';
 
-export default function EventFeed({ players }) {
-  const { eventHistory, actionHistory } = useGameStore();
-  const listRef = useRef(null);
+export default function EventFeed() {
+  const { socket } = useSocket();
+  const { roomCode, actionHistory, activeEvents, objectives, upgrades, metrics,
+    players, socketId, objectivesCompleted } = useGameStore();
+  const [sidebarTab, setSidebarTab] = useState('feed'); // feed | objectives | upgrades | team
 
-  // Combine events and actions, sorted by timestamp
-  const allItems = [
-    ...eventHistory.map(e => ({ ...e, type: 'event' })),
-    ...actionHistory.map(a => ({ ...a, type: 'action' })),
-  ].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)).slice(-30);
-
-  useEffect(() => {
-    if (listRef.current) {
-      listRef.current.scrollTop = listRef.current.scrollHeight;
-    }
-  }, [allItems.length]);
-
-  const formatTime = (ts) => {
-    if (!ts) return '';
-    const d = new Date(ts);
-    return `${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
+  const handleUpgrade = (upgradeId) => {
+    if (!socket) return;
+    socket.emit('game:upgrade', { roomCode, upgradeId }, (res) => {
+      if (!res.success) {
+        // Handle error silently — toast will show
+      }
+    });
   };
+
+  const availableUpgrades = Object.values(UPGRADES).filter(u => !upgrades.includes(u.id))
+    .sort((a, b) => a.tier - b.tier || a.cost - b.cost);
+
+  const activeObjectives = (objectives || []).filter(o => !o.completed);
+  const completedObjectives = (objectives || []).filter(o => o.completed);
 
   return (
     <div className="event-feed">
-      <div className="event-feed-header">
-        <span>📡 LIVE FEED</span>
-        <span style={{ color: 'var(--text-muted)' }}>{allItems.length}</span>
+      {/* Sidebar tabs */}
+      <div className="sidebar-tabs">
+        <button className={`sidebar-tab ${sidebarTab === 'feed' ? 'active' : ''}`}
+          onClick={() => setSidebarTab('feed')}>📡 Feed</button>
+        <button className={`sidebar-tab ${sidebarTab === 'objectives' ? 'active' : ''}`}
+          onClick={() => setSidebarTab('objectives')}>🎯 Goals</button>
+        <button className={`sidebar-tab ${sidebarTab === 'upgrades' ? 'active' : ''}`}
+          onClick={() => setSidebarTab('upgrades')}>🏪 Shop</button>
+        <button className={`sidebar-tab ${sidebarTab === 'team' ? 'active' : ''}`}
+          onClick={() => setSidebarTab('team')}>👥 Team</button>
       </div>
 
-      <div className="event-feed-list" ref={listRef}>
-        {allItems.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '2rem', fontSize: '0.45rem', color: 'var(--text-muted)' }}>
-            Waiting for events...
+      {/* Feed Tab */}
+      {sidebarTab === 'feed' && (
+        <div className="feed-content">
+          <div className="feed-scroll">
+            {actionHistory.length === 0 && (
+              <div className="feed-empty">Waiting for actions...</div>
+            )}
+            {[...actionHistory].reverse().map((item, i) => (
+              <div key={i} className={`feed-item ${item.hasRoleBonus ? 'bonus' : ''}`}>
+                <span className="feed-emoji">{item.actionEmoji}</span>
+                <span className="feed-text">
+                  <strong>{item.playerName}</strong> {item.actionName}
+                  {item.hasRoleBonus && <span className="feed-bonus">★</span>}
+                </span>
+              </div>
+            ))}
           </div>
-        )}
-        {allItems.map((item, i) => (
-          <div
-            key={`${item.type}-${i}`}
-            className={`event-item ${item.type === 'event' ? `severity-${item.severity || 'info'}` : 'type-action'}`}
-          >
-            <span className="event-time">[{formatTime(item.timestamp)}]</span>{' '}
-            <span className="event-text">
-              {item.type === 'event'
-                ? `${item.name || item.eventId} — ${item.description || ''}`
-                : `${item.actionEmoji || '⚡'} ${item.playerName} used ${item.actionName}`
-              }
-            </span>
-          </div>
-        ))}
-      </div>
+        </div>
+      )}
 
-      {/* Player list */}
-      {players && Object.keys(players).length > 0 && (
-        <div className="player-list-sidebar">
-          <h4>👥 TEAM</h4>
-          {Object.values(players).map((p) => {
-            const role = Object.values(ROLES).find(r => r.id === p.role);
+      {/* Objectives Tab */}
+      {sidebarTab === 'objectives' && (
+        <div className="objectives-content">
+          <div className="objectives-header">
+            🎯 Active Objectives
+            <span className="objectives-count">{objectivesCompleted} completed</span>
+          </div>
+          {activeObjectives.map((obj) => (
+            <div key={obj.id} className="objective-card">
+              <div className="objective-desc">{obj.description}</div>
+              {obj.sustainTicks > 0 && (
+                <div className="objective-progress">
+                  <div className="progress-bar">
+                    <div className="progress-fill"
+                      style={{ width: `${Math.min(100, ((obj.sustainProgress || 0) / obj.sustainTicks) * 100)}%` }} />
+                  </div>
+                  <span className="progress-text">{obj.sustainProgress || 0}/{obj.sustainTicks}s</span>
+                </div>
+              )}
+              <div className="objective-reward">
+                💰 +${obj.reward?.revenue || 0} • ⭐ +{obj.reward?.score || 0} pts
+              </div>
+            </div>
+          ))}
+          {completedObjectives.length > 0 && (
+            <>
+              <div className="objectives-header completed-header">✅ Completed</div>
+              {completedObjectives.map((obj) => (
+                <div key={obj.id} className="objective-card completed">
+                  <div className="objective-desc">{obj.description}</div>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Upgrades Tab */}
+      {sidebarTab === 'upgrades' && (
+        <div className="upgrades-content">
+          <div className="upgrades-header">
+            🏪 Upgrade Shop
+            <span className="revenue-display">💰 ${Math.round(metrics?.revenue || 0)}</span>
+          </div>
+          {availableUpgrades.map((upgrade) => {
+            const canAfford = (metrics?.revenue || 0) >= upgrade.cost;
             return (
-              <div key={p.id} className="player-mini">
-                <span className="role-dot" style={{ background: role?.color || '#666' }} />
-                <span>{role?.emoji || '?'}</span>
-                <span>{p.name}</span>
+              <div key={upgrade.id} className={`upgrade-card tier-${upgrade.tier} ${canAfford ? '' : 'cant-afford'}`}>
+                <div className="upgrade-info">
+                  <span className="upgrade-emoji">{upgrade.emoji}</span>
+                  <div className="upgrade-details">
+                    <div className="upgrade-name">{upgrade.name}</div>
+                    <div className="upgrade-desc">{upgrade.description}</div>
+                  </div>
+                </div>
+                <button
+                  className="upgrade-buy-btn"
+                  onClick={() => handleUpgrade(upgrade.id)}
+                  disabled={!canAfford}
+                >
+                  ${upgrade.cost}
+                </button>
               </div>
             );
           })}
+          {availableUpgrades.length === 0 && (
+            <div className="feed-empty">All upgrades purchased! 🎉</div>
+          )}
+          {/* Show purchased */}
+          {upgrades.length > 0 && (
+            <>
+              <div className="upgrades-header purchased-header">✅ Purchased</div>
+              {upgrades.map(id => {
+                const u = UPGRADES[id];
+                return u ? (
+                  <div key={id} className="upgrade-card purchased">
+                    <span>{u.emoji} {u.name}</span>
+                  </div>
+                ) : null;
+              })}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Team Tab */}
+      {sidebarTab === 'team' && (
+        <div className="team-content">
+          <div className="team-header">👥 Team</div>
+          {Object.entries(players || {}).map(([id, p]) => (
+            <div key={id} className={`team-member ${id === socketId ? 'is-me' : ''}`}>
+              <span className="member-status">●</span>
+              <span className="member-name">{p.name}{id === socketId ? ' (You)' : ''}</span>
+              <span className="member-role">{p.role}</span>
+              <span className="member-actions">{p.actionsUsed || 0} acts</span>
+            </div>
+          ))}
         </div>
       )}
     </div>

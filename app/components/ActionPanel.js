@@ -1,54 +1,189 @@
 'use client';
 
+import { useState } from 'react';
 import { useSocket } from '../hooks/useSocket';
 import { useGameStore } from '../hooks/useGameState';
-import { ACTIONS, ROLES, GAME_CONFIG } from '../lib/gameConfig';
+import { ACTIONS, ACTION_CATEGORIES, ROLE_BONUSES, GAME_CONFIG, METRICS_CONFIG } from '../lib/gameConfig';
+
+// Format an effect delta for display: "👥 +80", "🐛 −15", "💰 −$10".
+function formatEffect(metric, delta) {
+  const cfg = METRICS_CONFIG[metric];
+  if (!cfg) return null;
+  const sign = delta > 0 ? '+' : '−';
+  const abs = Math.abs(delta);
+  const value = cfg.unit === '$' ? `$${abs}` : cfg.unit === 'ms' ? `${abs}ms` : cfg.unit === '%' ? `${abs}%` : abs;
+  return { emoji: cfg.emoji, label: `${sign}${value}`, isGood: isPositive(metric, delta) };
+}
+
+// "Good" depends on the metric — fewer errors/latency is good.
+function isPositive(metric, delta) {
+  const inverted = metric === 'errors' || metric === 'latency';
+  return inverted ? delta < 0 : delta > 0;
+}
 
 export default function ActionPanel() {
   const { socket } = useSocket();
-  const { roomCode, myRole, myCooldowns, myActionsUsed, setNotification } = useGameStore();
+  const {
+    roomCode, myRole, myActionsUsed, setNotification,
+    activeActionTab, setActiveActionTab, players, socketId,
+    myBusyRemaining, myBusyTotal, myBusyAction, phase,
+  } = useGameStore();
+  const [delegateMode, setDelegateMode] = useState(null);
 
   if (!myRole) return null;
 
-  const role = Object.values(ROLES).find(r => r.id === myRole);
-  const availableActions = role ? role.actions.map(id => ACTIONS[id]).filter(Boolean) : [];
+  const roleBonusActions = ROLE_BONUSES[myRole] || [];
+  const categoryKeys = Object.keys(ACTION_CATEGORIES);
+  // Idea phase: only show idea-tagged actions; later phases hide them.
+  const ideaPhase = phase === 'idea';
+  const tabActions = ideaPhase
+    ? Object.values(ACTIONS).filter(a => a.phase === 'idea')
+    : Object.values(ACTIONS).filter(a => a.category === activeActionTab && a.phase !== 'idea');
+
+  const isBusy = myBusyRemaining > 0;
+  const busyAction = myBusyAction ? ACTIONS[myBusyAction] : null;
+  const busyPct = myBusyTotal > 0 ? ((myBusyTotal - myBusyRemaining) / myBusyTotal) * 100 : 0;
 
   const handleAction = (actionId) => {
+    if (delegateMode) return;
     if (!socket) return;
     socket.emit('game:action', { roomCode, actionId }, (res) => {
       if (!res.success) {
         setNotification({
-          message: res.cooldownRemaining
-            ? `Cooldown: ${res.cooldownRemaining}s`
-            : res.error,
+          message: res.cooldownRemaining ? `Busy: ${res.cooldownRemaining}s remaining` : res.error,
           type: 'error',
         });
       }
     });
   };
 
+  const handleDelegate = (actionId) => setDelegateMode(actionId);
+  const handleDelegateTarget = (targetId) => {
+    if (!socket || !delegateMode) return;
+    socket.emit('game:delegate', { roomCode, toPlayerId: targetId, actionId: delegateMode }, (res) => {
+      if (!res.success) setNotification({ message: res.error, type: 'error' });
+      else setNotification({ message: '📤 Delegation sent!', type: 'success' });
+    });
+    setDelegateMode(null);
+  };
+
+  const otherPlayers = Object.entries(players || {}).filter(([id]) => id !== socketId);
+  const maxedOut = myActionsUsed >= GAME_CONFIG.MAX_ACTIONS_PER_ROUND;
+
   return (
     <div className="action-panel">
-      <span className="actions-remaining">
-        {role.emoji} {role.name} • Actions: {myActionsUsed}/{GAME_CONFIG.MAX_ACTIONS_PER_ROUND}
-      </span>
-      {availableActions.map((action) => {
-        const cd = myCooldowns[action.id] || 0;
-        const disabled = cd > 0 || myActionsUsed >= GAME_CONFIG.MAX_ACTIONS_PER_ROUND;
-        return (
-          <button
-            key={action.id}
-            className="action-btn"
-            onClick={() => handleAction(action.id)}
-            disabled={disabled}
-            title={action.description}
-          >
-            <span className="action-emoji">{action.emoji}</span>
-            <span className="action-name">{action.name}</span>
-            {cd > 0 && <div className="action-cooldown">{cd}</div>}
-          </button>
-        );
-      })}
+      {/* Tab Bar — hidden during idea phase since only 3 actions exist */}
+      <div className="action-tabs">
+        {ideaPhase ? (
+          <span className="phase-pill">💡 IDEA PHASE — Talk to users, validate, then ship MVP to launch</span>
+        ) : (
+          categoryKeys.map((key) => (
+            <button
+              key={key}
+              className={`action-tab ${activeActionTab === key ? 'active' : ''}`}
+              onClick={() => setActiveActionTab(key)}
+            >
+              {ACTION_CATEGORIES[key].name}
+            </button>
+          ))
+        )}
+        <span className="actions-counter">
+          ⚙️ {myActionsUsed}/{GAME_CONFIG.MAX_ACTIONS_PER_ROUND}
+        </span>
+      </div>
+
+      {/* Global busy banner */}
+      {isBusy && busyAction && (
+        <div className="busy-banner">
+          <span className="busy-emoji">{busyAction.emoji}</span>
+          <span className="busy-text">
+            <strong>{busyAction.name}</strong> — {myBusyRemaining}s remaining
+          </span>
+          <div className="busy-progress">
+            <div className="busy-progress-fill" style={{ width: `${busyPct}%` }} />
+          </div>
+        </div>
+      )}
+
+      {/* Delegation target selector */}
+      {delegateMode && (
+        <div className="delegation-bar">
+          <span>🤝 Delegate <strong>{ACTIONS[delegateMode]?.name}</strong> to:</span>
+          {otherPlayers.map(([id, p]) => (
+            <button key={id} className="delegate-target-btn" onClick={() => handleDelegateTarget(id)}>
+              {p.name}
+            </button>
+          ))}
+          <button className="delegate-cancel-btn" onClick={() => setDelegateMode(null)}>✕</button>
+        </div>
+      )}
+
+      {/* Action Buttons */}
+      <div className="action-buttons">
+        {tabActions.map((action) => {
+          const locked = action.roleLock && action.roleLock !== myRole;
+          const disabled = locked || isBusy || maxedOut;
+          const hasBonus = roleBonusActions.includes(action.id);
+
+          // Effect chips, sorted: positives first, negatives last
+          const effectChips = Object.entries(action.effects || {})
+            .map(([m, d]) => ({ metric: m, ...formatEffect(m, d) }))
+            .filter(Boolean)
+            .sort((a, b) => (a.isGood === b.isGood ? 0 : a.isGood ? -1 : 1));
+
+          const titleText = locked
+            ? `${action.roleLock.toUpperCase()} only — ${action.description}`
+            : `${action.description}${hasBonus ? ' (1.5x Role Bonus!)' : ''}`;
+
+          return (
+            <div key={action.id} className={`action-btn-wrapper ${hasBonus ? 'has-bonus' : ''}`}>
+              <button
+                className={`action-btn ${disabled ? 'disabled' : ''} ${hasBonus ? 'bonus' : ''} ${locked ? 'locked' : ''}`}
+                onClick={() => handleAction(action.id)}
+                disabled={disabled}
+                title={titleText}
+              >
+                <div className="action-header">
+                  <span className="action-emoji">{action.emoji}</span>
+                  <span className="action-duration">⏱ {action.cooldown}s</span>
+                </div>
+                <span className="action-name">{action.name}</span>
+                <div className="action-effects">
+                  {effectChips.map((e) => (
+                    <span key={e.metric} className={`effect-chip ${e.isGood ? 'good' : 'bad'}`}>
+                      <span className="effect-icon">{e.emoji}</span>
+                      <span className="effect-value">{e.label}</span>
+                    </span>
+                  ))}
+                </div>
+                {hasBonus && !locked && <span className="bonus-badge">1.5x</span>}
+                {locked && <span className="lock-badge">🔒 {action.roleLock.toUpperCase()}</span>}
+              </button>
+              {otherPlayers.length > 0 && !locked && !isBusy && (
+                <button
+                  className="delegate-btn"
+                  onClick={() => handleDelegate(action.id)}
+                  title="Delegate to teammate"
+                >
+                  🤝
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="action-effects-hint">
+        <span className="effects-hint-text">
+          {ACTION_CATEGORIES[activeActionTab].description}
+          {hasBonus(activeActionTab, myRole) ? ' • ⭐ Your role gets a bonus here!' : ''}
+        </span>
+      </div>
     </div>
   );
+}
+
+function hasBonus(category, role) {
+  const bonusActions = ROLE_BONUSES[role] || [];
+  return Object.values(ACTIONS).some(a => a.category === category && bonusActions.includes(a.id));
 }

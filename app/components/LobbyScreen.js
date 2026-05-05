@@ -2,11 +2,12 @@
 
 import { useSocket } from '../hooks/useSocket';
 import { useGameStore } from '../hooks/useGameState';
-import { ROLES } from '../lib/gameConfig';
+import { ROLES, GAME_TYPES } from '../lib/gameConfig';
+import AvatarCustomizer from './AvatarCustomizer';
 
 export default function LobbyScreen() {
   const { socket } = useSocket();
-  const { room, roomCode, isHost, myRole, playerName, setNotification, setRoom } = useGameStore();
+  const { room, roomCode, isHost, myRole, myAvatar, playerName, setNotification, setRoom } = useGameStore();
 
   if (!room) return null;
 
@@ -39,6 +40,29 @@ export default function LobbyScreen() {
   };
 
   const allReady = players.length >= 1 && players.every(p => p.role && p.ready);
+
+  // Throttle avatar updates so quick swatch clicks don't spam the socket.
+  let avatarTimer = null;
+  const handleAvatarChange = (avatar) => {
+    if (avatarTimer) clearTimeout(avatarTimer);
+    avatarTimer = setTimeout(() => {
+      socket.emit('room:setAvatar', { roomCode, avatar }, () => {});
+    }, 120);
+  };
+
+  const botsEnabled = !!room.botsEnabled;
+  const handleToggleBots = () => {
+    socket.emit('room:setBots', { roomCode, enabled: !botsEnabled }, (res) => {
+      if (!res.success) setNotification({ message: res.error, type: 'error' });
+    });
+  };
+  const emptyRoleCount = Object.values(ROLES).length - players.filter(p => p.role).length;
+
+  const gameType = room.gameType || 'product';
+  const gameSubtype = room.gameSubtype || 'saas';
+  const handleSetGameType = (type, subtype) => {
+    socket.emit('room:setGameType', { roomCode, gameType: type, gameSubtype: subtype }, () => {});
+  };
 
   return (
     <div className="lobby-container">
@@ -102,9 +126,52 @@ export default function LobbyScreen() {
             })}
           </div>
         </div>
+
+        {/* Game type — host picks Product vs Service + a sub-type */}
+        <div className="lobby-section lobby-section-avatar">
+          <h3>🚀 STARTUP TYPE {!isHost && <span className="host-only">(host picks)</span>}</h3>
+          <div className="game-type-picker">
+            {Object.entries(GAME_TYPES).map(([typeKey, type]) => (
+              <div key={typeKey} className={`type-block ${gameType === typeKey ? 'active' : ''}`}>
+                <div className="type-header">
+                  <span className="type-emoji">{type.emoji}</span>
+                  <span className="type-label">{type.label}</span>
+                </div>
+                <div className="subtype-row">
+                  {Object.entries(type.subtypes).map(([subKey, sub]) => {
+                    const selected = gameType === typeKey && gameSubtype === subKey;
+                    return (
+                      <button key={subKey}
+                        className={`subtype-pill ${selected ? 'active' : ''}`}
+                        disabled={!isHost}
+                        onClick={() => handleSetGameType(typeKey, subKey)}>
+                        {sub.emoji} {sub.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Avatar — full-width row at bottom */}
+        <div className="lobby-section lobby-section-avatar">
+          <h3>🎨 YOUR AVATAR</h3>
+          <AvatarCustomizer value={myAvatar} onChange={handleAvatarChange} />
+        </div>
       </div>
 
       <div className="lobby-actions">
+        {isHost && (
+          <button
+            className={`btn-toggle ${botsEnabled ? 'on' : ''}`}
+            onClick={handleToggleBots}
+            title="Fill empty role slots with AI teammates"
+          >
+            🤖 Bots: {botsEnabled ? `ON (+${emptyRoleCount})` : 'OFF'}
+          </button>
+        )}
         <button className={`btn-secondary`} onClick={handleReady} disabled={!myRole}>
           {isReady ? '❌ NOT READY' : '✅ READY UP'}
         </button>

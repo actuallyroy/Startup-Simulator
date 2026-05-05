@@ -3,81 +3,79 @@
 import { useGameStore } from '../hooks/useGameState';
 
 export default function ScoreScreen() {
-  const { scores, reset } = useGameStore();
+  const { scores, reset, roomCode } = useGameStore();
 
-  if (!scores) return null;
+  if (!scores) return <div>Calculating scores...</div>;
 
   const handlePlayAgain = () => {
+    // The host should ideally restart the room, but for now we'll just reset client state
+    // and let them create a new room or re-join.
     reset();
+    window.location.reload();
   };
 
   return (
-    <div className="score-overlay">
-      <div className="score-card animate-slide-up">
-        <h2>🏁 ROUND COMPLETE</h2>
-        <div className={`score-grade grade-${scores.grade}`}>
+    <div className="score-screen">
+      <div className="score-card">
+        <h1>Round Complete!</h1>
+        <div className="final-grade grade-animation">
           {scores.grade}
         </div>
-        <div className="score-total">
-          Total Score: {scores.totalScore}/100
-        </div>
 
-        <div className="score-breakdown">
-          <div className="score-item">
-            <div className="score-label">🛡️ Uptime</div>
-            <div className="score-value" style={{ color: scores.uptimeScore > 70 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
-              {scores.uptimeScore}
-            </div>
+        <div className="score-details">
+          <div className="score-row">
+            <span>Uptime (Errors)</span>
+            <span>{scores.uptimeScore}</span>
           </div>
-          <div className="score-item">
-            <div className="score-label">📈 Growth</div>
-            <div className="score-value" style={{ color: scores.growthScore > 50 ? 'var(--accent-green)' : 'var(--accent-orange)' }}>
-              {scores.growthScore}
-            </div>
+          <div className="score-row">
+            <span>Growth (Users)</span>
+            <span>{scores.growthScore}</span>
           </div>
-          <div className="score-item">
-            <div className="score-label">⚡ Stability</div>
-            <div className="score-value" style={{ color: scores.stabilityScore > 70 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
-              {scores.stabilityScore}
-            </div>
+          <div className="score-row">
+            <span>Stability (Latency)</span>
+            <span>{scores.stabilityScore}</span>
           </div>
-          <div className="score-item">
-            <div className="score-label">💰 Efficiency</div>
-            <div className="score-value" style={{ color: scores.efficiencyScore > 50 ? 'var(--accent-green)' : 'var(--accent-orange)' }}>
-              {scores.efficiencyScore}
-            </div>
+          <div className="score-row">
+            <span>Efficiency (Revenue/User)</span>
+            <span>{scores.efficiencyScore}</span>
+          </div>
+          <div className="score-row bonus">
+            <span>Objectives Bonus ({scores.objectivesCompleted} done)</span>
+            <span>+{scores.objectiveBonus}</span>
+          </div>
+          <div className="score-row total">
+            <span>Total Score</span>
+            <span>{scores.totalScore}</span>
           </div>
         </div>
 
-        {/* Final metrics */}
-        {scores.finalMetrics && (
-          <div style={{
-            fontSize: '0.45rem', color: 'var(--text-muted)', marginBottom: '1rem',
-            display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap',
-          }}>
-            <span>👥 {scores.finalMetrics.users} users</span>
-            <span>🐛 {scores.finalMetrics.errors} errors</span>
-            <span>⚡ {Math.round(scores.finalMetrics.latency)}ms</span>
-            <span>💰 ${scores.finalMetrics.revenue}</span>
-          </div>
-        )}
-
-        {/* Player stats */}
-        {scores.playerStats && Object.values(scores.playerStats).length > 0 && (
-          <div style={{ marginBottom: '1rem' }}>
-            <div style={{ fontSize: '0.5rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>TEAM</div>
-            {Object.values(scores.playerStats).map((p, i) => (
-              <div key={i} style={{
-                fontSize: '0.45rem', color: 'var(--text-secondary)', padding: '0.2rem',
-              }}>
-                {p.name} ({p.role}) — {p.actionsUsed} actions
+        <div className="team-stats">
+          <h2>Team Performance</h2>
+          <div className="team-stats-grid">
+            {Object.entries(scores.playerStats || {}).map(([id, stat]) => (
+              <div key={id} className="player-stat-card">
+                <div className="player-stat-name">{stat.name}</div>
+                <div className="player-stat-role">{stat.role}</div>
+                <div className="player-stat-metrics">
+                  <span>⚙️ {stat.actionsUsed} Actions</span>
+                  <span>🤝 {stat.delegationsSent} Delegations</span>
+                </div>
               </div>
             ))}
           </div>
-        )}
+        </div>
 
-        <button className="btn-primary" onClick={handlePlayAgain}>
-          🔄 PLAY AGAIN
+        <div className="company-stats">
+          <h2>Final Company Stats</h2>
+          <div className="final-metrics">
+            <span>👥 {scores.finalMetrics.users} Users</span>
+            <span>💰 ${Math.round(scores.finalMetrics.revenue)} Revenue</span>
+            <span>✨ {scores.upgradesBought} Upgrades Bought</span>
+          </div>
+        </div>
+
+        <button className="play-again-btn" onClick={handlePlayAgain}>
+          Start New Company
         </button>
       </div>
     </div>

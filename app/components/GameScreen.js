@@ -1,55 +1,117 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo } from 'react';
 import { useSocket } from '../hooks/useSocket';
 import { useGameStore } from '../hooks/useGameState';
-import { ACTIONS, ROLES, METRICS_CONFIG, EVENTS, WORLD_STAGES } from '../lib/gameConfig';
 import MetricsBar from './MetricsBar';
-import ActionPanel from './ActionPanel';
-import EventFeed from './EventFeed';
 import PixelWorld from './PixelWorld';
+import EventFeed from './EventFeed';
+import ActionPanel from './ActionPanel';
+import { EVENT_RESPONSES, WORLD_STAGES } from '../lib/gameConfig';
 
 export default function GameScreen() {
-  const { metrics, activeEvents, tick, stage, timeRemaining, players } = useGameStore();
-  const [flashRed, setFlashRed] = useState(false);
-  const prevErrors = useRef(metrics?.errors || 0);
+  const { socket } = useSocket();
+  const {
+    roomCode, activeEvents, actionToasts, pendingDelegation,
+    setPendingDelegation, setNotification, stage, timeRemaining,
+  } = useGameStore();
 
-  // Flash red on error spike
-  useEffect(() => {
-    if (metrics && metrics.errors > prevErrors.current + 10) {
-      setFlashRed(true);
-      setTimeout(() => setFlashRed(false), 500);
-    }
-    prevErrors.current = metrics?.errors || 0;
-  }, [metrics?.errors]);
+  // Get unresponded events for alert banners
+  const alertEvents = (activeEvents || []).filter(e => !e.responded);
 
-  if (!metrics) {
-    return (
-      <div className="home-container">
-        <h2 style={{ color: 'var(--accent-blue)', animation: 'pulse 1s infinite' }}>
-          ⏳ Waiting for game state...
-        </h2>
-      </div>
-    );
-  }
+  const handleRespondEvent = (eventId) => {
+    if (!socket) return;
+    socket.emit('game:respondEvent', { roomCode, eventId }, (res) => {
+      if (!res.success) {
+        setNotification({ message: res.error || 'Failed to respond', type: 'error' });
+      }
+    });
+  };
+
+  const handleDelegationResponse = (delegationId, accepted) => {
+    if (!socket) return;
+    socket.emit('game:delegationResponse', { roomCode, delegationId, accepted }, () => {});
+    setPendingDelegation(null);
+  };
+
+  const stageName = WORLD_STAGES[stage]?.name || 'Garage Startup';
 
   return (
-    <div className="game-container">
-      <MetricsBar
-        metrics={metrics}
-        timeRemaining={timeRemaining}
-        tick={tick}
-        stage={stage}
-      />
-      <div className={`canvas-area ${flashRed ? 'flash-red' : ''}`}>
-        <PixelWorld
-          metrics={metrics}
-          stage={stage}
-          activeEvents={activeEvents}
-          players={players}
-        />
+    <div className="game-screen">
+      <MetricsBar />
+
+      <div className="game-content">
+        {/* Main game area */}
+        <div className="game-main">
+          {/* Pixel World */}
+          <PixelWorld />
+
+          {/* Event Alert Banners */}
+          <div className="event-alerts">
+            {alertEvents.slice(0, 2).map((event) => {
+              const response = EVENT_RESPONSES[event.id];
+              return (
+                <div key={`${event.id}-${event.startTick}`}
+                  className={`event-alert severity-${event.severity}`}>
+                  <div className="event-alert-content">
+                    <div className="event-alert-title">{event.name}</div>
+                    <div className="event-alert-desc">{event.description}</div>
+                  </div>
+                  <div className="event-alert-actions">
+                    {response && (
+                      <button className="event-respond-btn"
+                        onClick={() => handleRespondEvent(event.id)}>
+                        {response.label}
+                      </button>
+                    )}
+                    <button className="event-ignore-btn"
+                      onClick={() => {}}>
+                      ❌ Ignore
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Action Toasts */}
+          <div className="action-toasts">
+            {actionToasts.map((toast) => (
+              <div key={toast.id} className={`action-toast toast-${toast.type}`}>
+                {toast.message}
+              </div>
+            ))}
+          </div>
+
+          {/* Delegation Popup */}
+          {pendingDelegation && (
+            <div className="delegation-popup">
+              <div className="delegation-popup-content">
+                <div className="delegation-popup-title">🤝 Task Delegation</div>
+                <div className="delegation-popup-text">
+                  <strong>{pendingDelegation.fromName}</strong> wants you to:
+                </div>
+                <div className="delegation-action">
+                  {pendingDelegation.actionEmoji} {pendingDelegation.actionName}
+                </div>
+                <div className="delegation-popup-buttons">
+                  <button className="delegation-accept"
+                    onClick={() => handleDelegationResponse(pendingDelegation.delegationId, true)}>
+                    ✅ Accept
+                  </button>
+                  <button className="delegation-decline"
+                    onClick={() => handleDelegationResponse(pendingDelegation.delegationId, false)}>
+                    ❌ Decline
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right sidebar */}
+        <EventFeed />
       </div>
-      <EventFeed players={players} />
+
       <ActionPanel />
     </div>
   );

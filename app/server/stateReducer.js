@@ -1,134 +1,163 @@
-// State reducer — pure function: (state, action) → newState
+// State reducer — pure functions for game state mutations
 
-import { ACTIONS, METRICS_CONFIG, EVENTS } from '../lib/gameConfig.js';
+import { ACTIONS, METRICS_CONFIG, EVENTS, UPGRADES, ROLE_BONUSES, GAME_TYPES } from '../lib/gameConfig.js';
 
-export function createInitialState() {
+export function createInitialState(gameType = null, gameSubtype = null) {
   const metrics = {};
   for (const [key, config] of Object.entries(METRICS_CONFIG)) {
     metrics[key] = config.start;
   }
+  // Apply starting bonuses from the host's chosen sub-type
+  const sub = GAME_TYPES[gameType]?.subtypes?.[gameSubtype];
+  if (sub) {
+    if (typeof sub.startRevenue === 'number') metrics.revenue = sub.startRevenue;
+    if (typeof sub.startUsers === 'number') metrics.users = sub.startUsers;
+  }
   return {
-    metrics,
-    activeEvents: [],     // currently active events
-    eventHistory: [],     // all events that have occurred
-    tick: 0,
-    stage: 0,             // world stage index
+    metrics, activeEvents: [], eventHistory: [],
+    tick: 0, stage: 0, upgrades: [],
+    objectives: [], objectivesCompleted: 0, bonusScore: 0,
+    phase: 'idea',
+    gameType, gameSubtype,
+    revenueMultiplier: sub?.revenueMultiplier || 1.0,
   };
 }
 
-export function applyAction(state, actionId, playerId) {
+export function applyAction(state, actionId, playerId, playerRole, upgrades) {
   const action = ACTIONS[actionId];
   if (!action) return state;
 
+  const roleBonusActions = ROLE_BONUSES[playerRole] || [];
+  const hasRoleBonus = roleBonusActions.includes(actionId);
+  const multiplier = hasRoleBonus ? 1.5 : 1.0;
+
   const newMetrics = { ...state.metrics };
   for (const [metric, delta] of Object.entries(action.effects)) {
-    if (newMetrics[metric] !== undefined) {
-      const config = METRICS_CONFIG[metric];
-      newMetrics[metric] = Math.max(config.min, Math.min(config.max, newMetrics[metric] + delta));
+    if (newMetrics[metric] === undefined) continue;
+    let effectiveDelta = delta * multiplier;
+    // QA Team upgrade: Ship Feature no longer adds errors
+    if (upgrades.includes('qaTeam') && actionId === 'shipFeature' && metric === 'errors' && delta > 0) {
+      effectiveDelta = 0;
     }
+    const config = METRICS_CONFIG[metric];
+    newMetrics[metric] = Math.max(config.min, Math.min(config.max, newMetrics[metric] + effectiveDelta));
   }
 
-  return {
-    ...state,
-    metrics: newMetrics,
-  };
+  // Auto-scaling cap
+  if (upgrades.includes('autoScaling')) {
+    newMetrics.latency = Math.min(500, newMetrics.latency);
+  }
+
+  return { ...state, metrics: newMetrics };
 }
 
-export function applyEvent(state, eventId) {
-  const event = EVENTS[eventId];
-  if (!event) return state;
+// Event response effects map
+const EVENT_RESPONSE_EFFECTS = {
+  trafficSpike: { latency: -80, users: 50 },
+  serviceCrash: { errors: -20, latency: -300 },
+  bugInjection: { errors: -15, happiness: 3 },
+  badReviews: { happiness: 15, users: 20 },
+  costSurge: { revenue: 60 },
+  ddosAttack: { latency: -600, errors: -10 },
+  viralMoment: { users: 300, revenue: 40 },
+  dataLeak: { happiness: 20, users: 50, errors: -5 },
+  competitorLaunch: { users: 60, happiness: 5 },
+  techBlogFeature: { users: 200, revenue: 30 },
+};
+
+export function applyEventResponseClean(state, eventId) {
+  const effects = EVENT_RESPONSE_EFFECTS[eventId];
+  if (!effects) return state;
 
   const newMetrics = { ...state.metrics };
-  for (const [metric, delta] of Object.entries(event.effects)) {
-    if (newMetrics[metric] !== undefined) {
-      const config = METRICS_CONFIG[metric];
-      newMetrics[metric] = Math.max(config.min, Math.min(config.max, newMetrics[metric] + delta));
-    }
+  for (const [metric, delta] of Object.entries(effects)) {
+    if (newMetrics[metric] === undefined) continue;
+    const config = METRICS_CONFIG[metric];
+    newMetrics[metric] = Math.max(config.min, Math.min(config.max, newMetrics[metric] + delta));
   }
 
-  const newEvent = {
-    ...event,
-    startTick: state.tick,
-    endTick: state.tick + event.duration,
-  };
+  const activeEvents = state.activeEvents.map(e =>
+    e.id === eventId && !e.responded ? { ...e, responded: true } : e
+  );
 
-  return {
-    ...state,
-    metrics: newMetrics,
-    activeEvents: [...state.activeEvents, newEvent],
-    eventHistory: [...state.eventHistory, { ...newEvent, timestamp: Date.now() }],
-  };
+  return { ...state, metrics: newMetrics, activeEvents };
+}
+
+export function applyUpgrade(state, upgradeId) {
+  const upgrade = UPGRADES[upgradeId];
+  if (!upgrade) return state;
+  if (state.upgrades.includes(upgradeId)) return state;
+  if (state.metrics.revenue < upgrade.cost) return state;
+
+  const newMetrics = { ...state.metrics };
+  newMetrics.revenue -= upgrade.cost;
+
+  return { ...state, metrics: newMetrics, upgrades: [...state.upgrades, upgradeId] };
 }
 
 export function tickState(state) {
   const newMetrics = { ...state.metrics };
+  const upgrades = state.upgrades;
 
   // Natural growth/decay
   for (const [key, config] of Object.entries(METRICS_CONFIG)) {
-    const naturalChange = config.growthRate + config.decayRate;
+    let naturalChange = config.growthRate + config.decayRate;
+    if (key === 'errors' && upgrades.includes('standingDesks')) naturalChange *= 0.95;
     if (naturalChange !== 0) {
       newMetrics[key] = Math.max(config.min, Math.min(config.max, newMetrics[key] + naturalChange));
     }
   }
 
-  // Revenue is based on users & happiness
-  const userFactor = newMetrics.users / 1000;
-  const happinessFactor = newMetrics.happiness / 100;
-  const errorPenalty = newMetrics.errors / 50;
-  const revenueGain = Math.round(userFactor * happinessFactor * 10 - errorPenalty * 5);
-  newMetrics.revenue = Math.max(
-    METRICS_CONFIG.revenue.min,
-    Math.min(METRICS_CONFIG.revenue.max, newMetrics.revenue + revenueGain)
-  );
-
-  // High errors increase latency slightly
-  if (newMetrics.errors > 50) {
-    newMetrics.latency = Math.min(METRICS_CONFIG.latency.max, newMetrics.latency + 5);
+  // Upgrade tick bonuses
+  for (const upId of upgrades) {
+    const up = UPGRADES[upId];
+    if (up?.effect?.type === 'tickBonus') {
+      const config = METRICS_CONFIG[up.effect.metric];
+      if (config) {
+        newMetrics[up.effect.metric] = Math.max(
+          config.min, Math.min(config.max, newMetrics[up.effect.metric] + up.effect.value)
+        );
+      }
+    }
   }
 
-  // High latency decreases happiness
-  if (newMetrics.latency > 200) {
-    newMetrics.happiness = Math.max(METRICS_CONFIG.happiness.min, newMetrics.happiness - 1);
+  // Revenue from users & happiness — only after launch, scaled by game-type multiplier
+  if (state.phase !== 'idea') {
+    const userFactor = newMetrics.users / 1000;
+    const happinessFactor = newMetrics.happiness / 100;
+    const errorPenalty = newMetrics.errors / 50;
+    const mult = state.revenueMultiplier || 1.0;
+    const revenueGain = Math.round((userFactor * happinessFactor * 10 - errorPenalty * 5) * mult);
+    newMetrics.revenue = Math.max(METRICS_CONFIG.revenue.min, Math.min(METRICS_CONFIG.revenue.max, newMetrics.revenue + revenueGain));
   }
 
-  // Remove expired active events
+  // Cross-metric effects
+  if (newMetrics.errors > 50) newMetrics.latency = Math.min(METRICS_CONFIG.latency.max, newMetrics.latency + 5);
+  if (newMetrics.latency > 200) newMetrics.happiness = Math.max(METRICS_CONFIG.happiness.min, newMetrics.happiness - 1);
+  if (upgrades.includes('autoScaling')) newMetrics.latency = Math.min(500, newMetrics.latency);
+
+  // Remove expired events
   const activeEvents = state.activeEvents.filter(e => e.endTick > state.tick);
 
-  // Calculate world stage based on users
+  // World stage
   let stage = 0;
   if (newMetrics.users >= 5000) stage = 3;
   else if (newMetrics.users >= 2000) stage = 2;
   else if (newMetrics.users >= 500) stage = 1;
+  if (upgrades.includes('seriesAOffice') && stage < 2) stage = 2;
 
-  return {
-    ...state,
-    metrics: newMetrics,
-    activeEvents,
-    tick: state.tick + 1,
-    stage,
-  };
+  return { ...state, metrics: newMetrics, activeEvents, tick: state.tick + 1, stage };
 }
 
 export function calculateScores(state, players) {
   const { metrics } = state;
-
-  // Uptime: inverse of errors (lower errors = higher score)
   const uptimeScore = Math.round(Math.max(0, 100 - metrics.errors));
-
-  // Growth: based on final user count relative to starting
   const growthScore = Math.round(Math.min(100, (metrics.users / METRICS_CONFIG.users.max) * 100));
-
-  // Stability: inverse of latency
   const stabilityScore = Math.round(Math.max(0, 100 - (metrics.latency / METRICS_CONFIG.latency.max) * 100));
+  const efficiencyScore = metrics.users > 0 ? Math.round(Math.min(100, (metrics.revenue / metrics.users) * 10)) : 0;
+  const objectiveBonus = state.bonusScore || 0;
+  const totalScore = Math.round((uptimeScore + growthScore + stabilityScore + efficiencyScore) / 4 + objectiveBonus);
 
-  // Efficiency: revenue relative to users
-  const efficiencyScore = metrics.users > 0
-    ? Math.round(Math.min(100, (metrics.revenue / metrics.users) * 10))
-    : 0;
-
-  const totalScore = Math.round((uptimeScore + growthScore + stabilityScore + efficiencyScore) / 4);
-
-  // Grade
   let grade = 'F';
   if (totalScore >= 90) grade = 'S';
   else if (totalScore >= 80) grade = 'A';
@@ -137,18 +166,15 @@ export function calculateScores(state, players) {
   else if (totalScore >= 50) grade = 'D';
 
   return {
-    uptimeScore,
-    growthScore,
-    stabilityScore,
-    efficiencyScore,
-    totalScore,
-    grade,
+    uptimeScore, growthScore, stabilityScore, efficiencyScore,
+    objectiveBonus, totalScore, grade,
+    objectivesCompleted: state.objectivesCompleted || 0,
+    upgradesBought: state.upgrades.length,
     finalMetrics: { ...metrics },
     playerStats: Object.fromEntries(
       Object.entries(players).map(([id, p]) => [id, {
-        name: p.name,
-        role: p.role,
-        actionsUsed: p.actionsUsed || 0,
+        name: p.name, role: p.role, actionsUsed: p.actionsUsed || 0,
+        delegationsSent: p.delegationsSent || 0,
       }])
     ),
   };

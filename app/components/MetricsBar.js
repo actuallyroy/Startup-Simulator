@@ -2,12 +2,18 @@
 
 import { useRef, useEffect } from 'react';
 import { METRICS_CONFIG, WORLD_STAGES } from '../lib/gameConfig';
+import { useGameStore } from '../hooks/useGameState';
 
-export default function MetricsBar({ metrics, timeRemaining, tick, stage }) {
+export default function MetricsBar() {
+  const metrics = useGameStore((s) => s.metrics);
+  const timeRemaining = useGameStore((s) => s.timeRemaining);
+  const stage = useGameStore((s) => s.stage);
+
   const prevMetrics = useRef(metrics);
   const changingMetrics = useRef({});
 
   useEffect(() => {
+    if (!metrics) return;
     if (!prevMetrics.current) { prevMetrics.current = metrics; return; }
     const changed = {};
     for (const key in metrics) {
@@ -18,6 +24,8 @@ export default function MetricsBar({ metrics, timeRemaining, tick, stage }) {
     const t = setTimeout(() => { changingMetrics.current = {}; }, 300);
     return () => clearTimeout(t);
   }, [metrics]);
+
+  if (!metrics) return null;
 
   const formatTime = (secs) => {
     const m = Math.floor(secs / 60);

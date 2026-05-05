@@ -2,6 +2,7 @@
 
 import { GAME_CONFIG, ROLES, ROOM_STATES } from '../lib/gameConfig.js';
 import { GameEngine } from './gameEngine.js';
+import { randomAvatar, sanitizeAvatar } from '../lib/avatarConfig.js';
 
 const rooms = new Map();
 
@@ -27,6 +28,9 @@ export function createRoom(hostSocketId, hostName) {
     players: {},
     engine: null,
     createdAt: Date.now(),
+    botsEnabled: false,
+    gameType: 'product',
+    gameSubtype: 'saas',
   };
 
   room.players[hostSocketId] = {
@@ -35,7 +39,10 @@ export function createRoom(hostSocketId, hostName) {
     role: null,
     ready: false,
     actionsUsed: 0,
-    cooldowns: {},
+    busyUntil: 0,
+    busyAction: null,
+    busyTotal: 0,
+    avatar: randomAvatar(),
   };
 
   rooms.set(code, room);
@@ -54,10 +61,78 @@ export function joinRoom(roomCode, socketId, playerName) {
     role: null,
     ready: false,
     actionsUsed: 0,
-    cooldowns: {},
+    busyUntil: 0,
+    busyAction: null,
+    busyTotal: 0,
+    avatar: randomAvatar(),
   };
 
   return { room };
+}
+
+export function setAvatar(roomCode, socketId, avatar) {
+  const room = rooms.get(roomCode);
+  if (!room) return { error: 'Room not found' };
+  if (!room.players[socketId]) return { error: 'Player not in room' };
+  room.players[socketId].avatar = sanitizeAvatar(avatar);
+  return { room };
+}
+
+export function setGameType(roomCode, socketId, gameType, gameSubtype) {
+  const room = rooms.get(roomCode);
+  if (!room) return { error: 'Room not found' };
+  if (room.host !== socketId) return { error: 'Only host can set game type' };
+  const types = ['product', 'service'];
+  if (!types.includes(gameType)) return { error: 'Invalid game type' };
+  room.gameType = gameType;
+  if (gameSubtype) room.gameSubtype = gameSubtype;
+  return { room };
+}
+
+export function setBotsEnabled(roomCode, socketId, enabled) {
+  const room = rooms.get(roomCode);
+  if (!room) return { error: 'Room not found' };
+  if (room.host !== socketId) return { error: 'Only host can toggle bots' };
+  room.botsEnabled = !!enabled;
+  return { room };
+}
+
+const BOT_NAMES = {
+  backend: ['Byte', 'Sudo', 'Cron'],
+  frontend: ['Pixel', 'Hexa', 'Neo'],
+  devops: ['Kube', 'Echo', 'Daemon'],
+  pm: ['Sprint', 'Roadmap', 'OKR'],
+  chaos: ['Glitch', 'Anarchy', 'Havoc'],
+};
+
+function pickBotName(role, taken) {
+  const pool = BOT_NAMES[role] || ['Bot'];
+  for (const n of pool) if (!taken.has(n)) return n;
+  return `${pool[0]}-${Math.floor(Math.random() * 100)}`;
+}
+
+export function addBotsForEmptyRoles(roomCode) {
+  const room = rooms.get(roomCode);
+  if (!room) return { error: 'Room not found' };
+  const allRoles = Object.values(ROLES).map(r => r.id);
+  const takenRoles = new Set(Object.values(room.players).map(p => p.role).filter(Boolean));
+  const takenNames = new Set(Object.values(room.players).map(p => p.name));
+  let added = 0;
+  for (const role of allRoles) {
+    if (takenRoles.has(role)) continue;
+    if (Object.keys(room.players).length >= GAME_CONFIG.MAX_PLAYERS) break;
+    const id = `bot-${role}-${Math.random().toString(36).slice(2, 8)}`;
+    const name = pickBotName(role, takenNames);
+    takenNames.add(name);
+    room.players[id] = {
+      id, name, role, ready: true,
+      actionsUsed: 0, busyUntil: 0, busyAction: null, busyTotal: 0,
+      avatar: randomAvatar(),
+      isBot: true,
+    };
+    added++;
+  }
+  return { room, added };
 }
 
 export function leaveRoom(roomCode, socketId) {
@@ -84,6 +159,7 @@ export function leaveRoom(roomCode, socketId) {
 export function selectRole(roomCode, socketId, roleId) {
   const room = rooms.get(roomCode);
   if (!room) return { error: 'Room not found' };
+  if (!room.players[socketId]) return { error: 'Player not in room' };
 
   // Check if role is already taken
   const roleTaken = Object.values(room.players).some(
@@ -102,6 +178,7 @@ export function selectRole(roomCode, socketId, roleId) {
 export function setReady(roomCode, socketId, ready) {
   const room = rooms.get(roomCode);
   if (!room) return { error: 'Room not found' };
+  if (!room.players[socketId]) return { error: 'Player not in room' };
 
   room.players[socketId].ready = ready;
   return { room };

@@ -1,20 +1,13 @@
-// Custom server — Node.js + Next.js + Socket.IO
+// Custom server — Node.js + Next.js + Socket.IO with all game systems
 
 import { createServer } from 'http';
 import { parse } from 'url';
 import next from 'next';
 import { Server } from 'socket.io';
 import {
-  createRoom,
-  joinRoom,
-  leaveRoom,
-  selectRole,
-  setReady,
-  canStartGame,
-  startGame,
-  getRoom,
-  handleAction,
-  getRoomForSocket,
+  createRoom, joinRoom, leaveRoom, selectRole, setReady,
+  canStartGame, startGame, getRoom, handleAction, getRoomForSocket,
+  setAvatar, setBotsEnabled, addBotsForEmptyRoles, setGameType,
 } from './roomManager.js';
 
 const dev = process.env.NODE_ENV !== 'production';
@@ -39,90 +32,138 @@ app.prepare().then(() => {
   io.on('connection', (socket) => {
     console.log(`[Socket] Connected: ${socket.id}`);
 
-    // Create a new room
-    socket.on('room:create', ({ playerName }, callback) => {
+    // ── Room Management ──
+    socket.on('room:create', ({ playerName }, cb) => {
       const room = createRoom(socket.id, playerName);
       socket.join(room.code);
-      console.log(`[Room] Created room ${room.code} by ${playerName}`);
-      callback({ success: true, roomCode: room.code, room: sanitizeRoom(room) });
+      cb({ success: true, roomCode: room.code, room: sanitizeRoom(room) });
     });
 
-    // Join an existing room
-    socket.on('room:join', ({ roomCode, playerName }, callback) => {
+    socket.on('room:join', ({ roomCode, playerName }, cb) => {
       const result = joinRoom(roomCode.toUpperCase(), socket.id, playerName);
-      if (result.error) {
-        callback({ success: false, error: result.error });
-        return;
-      }
+      if (result.error) return cb({ success: false, error: result.error });
       socket.join(roomCode.toUpperCase());
-      console.log(`[Room] ${playerName} joined room ${roomCode}`);
-
-      // Notify everyone in the room
       io.to(roomCode.toUpperCase()).emit('room:update', sanitizeRoom(result.room));
-      callback({ success: true, roomCode: roomCode.toUpperCase(), room: sanitizeRoom(result.room) });
+      cb({ success: true, roomCode: roomCode.toUpperCase(), room: sanitizeRoom(result.room) });
     });
 
-    // Select a role
-    socket.on('room:selectRole', ({ roomCode, roleId }, callback) => {
+    socket.on('room:selectRole', ({ roomCode, roleId }, cb) => {
       const result = selectRole(roomCode, socket.id, roleId);
-      if (result.error) {
-        callback({ success: false, error: result.error });
-        return;
-      }
+      if (result.error) return cb({ success: false, error: result.error });
       io.to(roomCode).emit('room:update', sanitizeRoom(result.room));
-      callback({ success: true });
+      cb({ success: true });
     });
 
-    // Toggle ready
-    socket.on('room:ready', ({ roomCode, ready }, callback) => {
+    socket.on('room:setGameType', ({ roomCode, gameType, gameSubtype }, cb) => {
+      const result = setGameType(roomCode, socket.id, gameType, gameSubtype);
+      if (result.error) return cb && cb({ success: false, error: result.error });
+      io.to(roomCode).emit('room:update', sanitizeRoom(result.room));
+      cb && cb({ success: true });
+    });
+
+    socket.on('room:setBots', ({ roomCode, enabled }, cb) => {
+      const result = setBotsEnabled(roomCode, socket.id, enabled);
+      if (result.error) return cb && cb({ success: false, error: result.error });
+      io.to(roomCode).emit('room:update', sanitizeRoom(result.room));
+      cb && cb({ success: true });
+    });
+
+    socket.on('room:setAvatar', ({ roomCode, avatar }, cb) => {
+      const result = setAvatar(roomCode, socket.id, avatar);
+      if (result.error) return cb && cb({ success: false, error: result.error });
+      io.to(roomCode).emit('room:update', sanitizeRoom(result.room));
+      cb && cb({ success: true });
+    });
+
+    socket.on('room:ready', ({ roomCode, ready }, cb) => {
       const result = setReady(roomCode, socket.id, ready);
-      if (result.error) {
-        callback({ success: false, error: result.error });
-        return;
-      }
+      if (result.error) return cb({ success: false, error: result.error });
       io.to(roomCode).emit('room:update', sanitizeRoom(result.room));
-      callback({ success: true });
+      cb({ success: true });
     });
 
-    // Start the game
-    socket.on('room:start', ({ roomCode }, callback) => {
+    socket.on('room:start', ({ roomCode }, cb) => {
       const room = getRoom(roomCode);
-      if (!room) {
-        callback({ success: false, error: 'Room not found' });
-        return;
+      if (!room) return cb({ success: false, error: 'Room not found' });
+      if (room.host !== socket.id) return cb({ success: false, error: 'Only host can start' });
+      if (!canStartGame(roomCode)) return cb({ success: false, error: 'Not all players ready with roles' });
+      if (room.botsEnabled) {
+        addBotsForEmptyRoles(roomCode);
+        io.to(roomCode).emit('room:update', sanitizeRoom(room));
       }
-      if (room.host !== socket.id) {
-        callback({ success: false, error: 'Only host can start' });
-        return;
-      }
-      if (!canStartGame(roomCode)) {
-        callback({ success: false, error: 'Not all players are ready with roles' });
-        return;
-      }
-
       const result = startGame(roomCode, io);
-      if (result.error) {
-        callback({ success: false, error: result.error });
-        return;
-      }
-
+      if (result.error) return cb({ success: false, error: result.error });
       io.to(roomCode).emit('game:start', { roomCode });
-      callback({ success: true });
+      cb({ success: true });
     });
 
-    // Handle player action during gameplay
-    socket.on('game:action', ({ roomCode, actionId }, callback) => {
+    // ── Gameplay Actions ──
+    socket.on('game:action', ({ roomCode, actionId }, cb) => {
       const result = handleAction(roomCode, socket.id, actionId);
-      if (result.error) {
-        callback({ success: false, error: result.error, cooldownRemaining: result.cooldownRemaining });
-        return;
-      }
-      callback({ success: true, cooldown: result.cooldown });
+      if (result.error) return cb({ success: false, error: result.error, cooldownRemaining: result.cooldownRemaining });
+      cb({ success: true, cooldown: result.cooldown, hasRoleBonus: result.hasRoleBonus });
     });
 
-    // Handle disconnect
+    // ── Event Response ──
+    socket.on('game:respondEvent', ({ roomCode, eventId }, cb) => {
+      const room = getRoom(roomCode);
+      if (!room?.engine) return cb({ success: false, error: 'No active game' });
+      const result = room.engine.handleEventResponse(socket.id, eventId);
+      if (result.error) return cb({ success: false, error: result.error });
+      cb({ success: true });
+    });
+
+    // ── Upgrades ──
+    socket.on('game:upgrade', ({ roomCode, upgradeId }, cb) => {
+      const room = getRoom(roomCode);
+      if (!room?.engine) return cb({ success: false, error: 'No active game' });
+      const result = room.engine.handleUpgrade(socket.id, upgradeId);
+      if (result.error) return cb({ success: false, error: result.error, needed: result.needed });
+      cb({ success: true });
+    });
+
+    // ── Task Delegation ──
+    socket.on('game:delegate', ({ roomCode, toPlayerId, actionId }, cb) => {
+      const room = getRoom(roomCode);
+      if (!room?.engine) return cb({ success: false, error: 'No active game' });
+      const result = room.engine.handleDelegation(socket.id, toPlayerId, actionId);
+      if (result.error) return cb({ success: false, error: result.error });
+      cb({ success: true, delegationId: result.delegationId });
+    });
+
+    socket.on('game:delegationResponse', ({ roomCode, delegationId, accepted }, cb) => {
+      const room = getRoom(roomCode);
+      if (!room?.engine) return cb({ success: false, error: 'No active game' });
+      const result = room.engine.handleDelegationResponse(socket.id, delegationId, accepted);
+      if (result.error) return cb({ success: false, error: result.error });
+      cb({ success: true });
+    });
+
+    // ── Player Movement ──
+    socket.on('game:move', ({ roomCode, position }) => {
+      const room = getRoom(roomCode);
+      if (!room) return;
+      const player = room.players[socket.id];
+      if (player) {
+        player.position = position;
+        // Broadcast movement to others
+        socket.to(roomCode).emit('game:playerMoved', {
+          playerId: socket.id, position,
+        });
+      }
+    });
+
+    // ── Chat Bubble ──
+    socket.on('game:chatBubble', ({ roomCode, message }) => {
+      io.to(roomCode).emit('game:chatBubble', {
+        playerId: socket.id,
+        playerName: getRoom(roomCode)?.players[socket.id]?.name || '?',
+        message,
+      });
+    });
+
+    // ── Disconnect ──
     socket.on('disconnect', () => {
-      console.log(`[Socket] Disconnected: ${socket.id}`);
       const roomCode = getRoomForSocket(socket.id);
       if (roomCode) {
         const result = leaveRoom(roomCode, socket.id);
@@ -146,15 +187,14 @@ app.prepare().then(() => {
 
 function sanitizeRoom(room) {
   return {
-    code: room.code,
-    state: room.state,
-    host: room.host,
+    code: room.code, state: room.state, host: room.host,
+    botsEnabled: !!room.botsEnabled,
+    gameType: room.gameType || 'product',
+    gameSubtype: room.gameSubtype || 'saas',
     players: Object.fromEntries(
       Object.entries(room.players).map(([id, p]) => [id, {
-        id: p.id,
-        name: p.name,
-        role: p.role,
-        ready: p.ready,
+        id: p.id, name: p.name, role: p.role, ready: p.ready,
+        avatar: p.avatar, isBot: !!p.isBot,
       }])
     ),
   };
