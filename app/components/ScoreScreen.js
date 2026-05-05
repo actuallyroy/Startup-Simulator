@@ -1,9 +1,11 @@
 'use client';
 
 import { useGameStore } from '../hooks/useGameState';
+import { useSocket } from '../hooks/useSocket';
 
 export default function ScoreScreen() {
-  const { scores, reset, roomCode, endReason } = useGameStore();
+  const { scores, reset, roomCode, endReason, isHost } = useGameStore();
+  const { socket } = useSocket();
 
   if (!scores) return <div>Calculating scores...</div>;
 
@@ -14,8 +16,15 @@ export default function ScoreScreen() {
     : null;
 
   const handlePlayAgain = () => {
-    // The host should ideally restart the room, but for now we'll just reset client state
-    // and let them create a new room or re-join.
+    if (!socket || !roomCode) {
+      reset();
+      window.location.reload();
+      return;
+    }
+    socket.emit('room:playAgain', { roomCode }, () => {});
+  };
+
+  const handleLeave = () => {
     reset();
     window.location.reload();
   };
@@ -81,9 +90,18 @@ export default function ScoreScreen() {
           </div>
         </div>
 
-        <button className="play-again-btn" onClick={handlePlayAgain}>
-          Start New Company
-        </button>
+        <div className="score-actions">
+          {isHost ? (
+            <button className="play-again-btn" onClick={handlePlayAgain}>
+              🔄 Play Again (same lobby)
+            </button>
+          ) : (
+            <p className="waiting-host">Waiting for host to restart…</p>
+          )}
+          <button className="leave-btn" onClick={handleLeave}>
+            Leave Room
+          </button>
+        </div>
       </div>
     </div>
   );

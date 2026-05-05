@@ -8,7 +8,7 @@ import { UPGRADES, EVENT_RESPONSES } from '../lib/gameConfig';
 export default function EventFeed() {
   const { socket } = useSocket();
   const { roomCode, actionHistory, activeEvents, objectives, upgrades, metrics,
-    players, socketId, objectivesCompleted } = useGameStore();
+    players, socketId, objectivesCompleted, myRole } = useGameStore();
   const [sidebarTab, setSidebarTab] = useState('feed'); // feed | objectives | upgrades | team
   const [collapsed, setCollapsed] = useState(false);
 
@@ -156,15 +156,43 @@ export default function EventFeed() {
       {/* Team Tab */}
       {sidebarTab === 'team' && (
         <div className="team-content">
-          <div className="team-header">👥 Team</div>
-          {Object.entries(players || {}).map(([id, p]) => (
-            <div key={id} className={`team-member ${id === socketId ? 'is-me' : ''}`}>
-              <span className="member-status">●</span>
-              <span className="member-name">{p.name}{id === socketId ? ' (You)' : ''}</span>
-              <span className="member-role">{p.role}</span>
-              <span className="member-actions">{p.actionsUsed || 0} acts</span>
-            </div>
-          ))}
+          <div className="team-header">
+            👥 Team {myRole === 'hr' && <span className="hr-tag">HR — drag to set salaries</span>}
+          </div>
+          {Object.entries(players || {}).map(([id, p]) => {
+            const motMood = (p.motivation || 70) > 80 ? '🔥' : (p.motivation || 70) < 40 ? '😞' : '😐';
+            const onSalary = (e) => {
+              const val = Number(e.target.value);
+              if (!socket) return;
+              socket.emit('game:setSalary', { roomCode, targetPlayerId: id, salary: val }, () => {});
+            };
+            return (
+              <div key={id} className={`team-card ${id === socketId ? 'is-me' : ''}`}>
+                <div className="team-card-row">
+                  <span className="member-status">●</span>
+                  <span className="member-name">{p.name}{id === socketId ? ' (You)' : ''}</span>
+                  <span className="member-role">{p.role}</span>
+                </div>
+                <div className="team-card-row">
+                  <span className="member-mot" title={`Motivation ${p.motivation || 70}`}>
+                    {motMood} <span className="mot-value">{Math.round(p.motivation || 70)}</span>
+                    <span className="mot-bar"><span className="mot-bar-fill" style={{width: `${p.motivation || 70}%`}} /></span>
+                  </span>
+                </div>
+                <div className="team-card-row salary-row">
+                  <span className="salary-label">$ {p.salary || 50}/tick</span>
+                  {myRole === 'hr' && (
+                    <input
+                      type="range" min="20" max="250" step="5"
+                      defaultValue={p.salary || 50}
+                      onChange={onSalary}
+                      className="salary-slider"
+                    />
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

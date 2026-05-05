@@ -11,6 +11,8 @@ export default function MetricsBar() {
   const milestone = useGameStore((s) => s.milestone);
   const winCondition = useGameStore((s) => s.winCondition);
   const lastBurn = useGameStore((s) => s.lastBurn);
+  const lastIncome = useGameStore((s) => s.lastIncome);
+  const arpu = useGameStore((s) => s.arpu);
 
   const prevMetrics = useRef(metrics);
   const changingMetrics = useRef({});
@@ -97,8 +99,11 @@ export default function MetricsBar() {
             <div key={key} className={`metric-item ${status ? `metric-${status}` : ''}`}>
               <span className="metric-label">
                 {config.emoji} {config.name}
-                {key === 'revenue' && lastBurn > 0 && (
-                  <span className="burn-badge" title="Burn this tick">−${lastBurn}/t</span>
+                {key === 'revenue' && (lastBurn > 0 || lastIncome > 0) && (
+                  <span className="cashflow-badge" title={`ARPU: $${arpu.toFixed(2)}/user/tick`}>
+                    {lastIncome > 0 && <span className="cf-income">+${lastIncome}</span>}
+                    {lastBurn > 0 && <span className="cf-burn">−${lastBurn}</span>}
+                  </span>
                 )}
               </span>
               <span className={`metric-value ${isChanging ? 'changing' : ''}`} style={{ color: config.color }}>

@@ -44,6 +44,7 @@ class WorldScene extends Phaser.Scene {
     this.drawFloor();
     this.drawDesks();
     this.drawServerRack();
+    this.drawDustMotes();
     this.setupPan();
 
     this.playerLayer = this.add.container(0, 0);
@@ -70,10 +71,18 @@ class WorldScene extends Phaser.Scene {
 
   drawWall() {
     const g = this.add.graphics();
-    // Solid wall color from top of room to floor
-    g.fillStyle(0x4a5568).fillRect(0, 60, WORLD_W, FLOOR_TOP - 60 + 8);
-    // Wall stripes / wainscot
-    g.fillStyle(0x3a4252).fillRect(0, FLOOR_TOP - 6, WORLD_W, 6);
+    // Warm wall — vertical gradient from soft dusk to wainscot
+    for (let y = 60; y < FLOOR_TOP + 8; y += 4) {
+      const t = (y - 60) / (FLOOR_TOP - 60);
+      const r = Math.round(0x3d + (0x4a - 0x3d) * t);
+      const gc = Math.round(0x35 + (0x42 - 0x35) * t);
+      const b = Math.round(0x52 + (0x68 - 0x52) * t);
+      const color = (r << 16) | (gc << 8) | b;
+      g.fillStyle(color).fillRect(0, y, WORLD_W, 4);
+    }
+    // Wainscot stripe
+    g.fillStyle(0x2a2f4a).fillRect(0, FLOOR_TOP - 8, WORLD_W, 8);
+    g.fillStyle(0x363c5c).fillRect(0, FLOOR_TOP - 10, WORLD_W, 2);
     // Picture frames + whiteboard scattered along the wall
     const frame = (x, y, w, h, color) => {
       g.fillStyle(0x111).fillRect(x, y, w, h);
@@ -110,15 +119,34 @@ class WorldScene extends Phaser.Scene {
 
   drawWindow() {
     const g = this.add.graphics();
-    // Two windows now that the world is wider
+    // Two pretty windows with sunset gradient sky
     const drawOne = (cx) => {
-      g.fillStyle(0x2c3e50).fillRect(cx - 76, 16, 152, 56);
-      g.fillStyle(0x87ceeb).fillRect(cx - 70, 22, 140, 44);
-      g.fillStyle(0xfff176).fillCircle(cx + 40, 36, 6);
-      g.fillStyle(0x546e7a).fillRect(cx - 60, 50, 22, 16);
-      g.fillStyle(0x455a64).fillRect(cx - 30, 42, 18, 24);
-      g.fillStyle(0x546e7a).fillRect(cx, 48, 14, 18);
-      g.fillStyle(0x455a64).fillRect(cx + 18, 40, 18, 26);
+      // Frame
+      g.fillStyle(0x1a1f3a).fillRect(cx - 78, 14, 156, 60);
+      // Sky gradient (top peach → bottom periwinkle)
+      const skyTop = [0xff, 0xc4, 0x95];
+      const skyBot = [0x7d, 0xd3, 0xfc];
+      for (let i = 0; i < 44; i += 2) {
+        const t = i / 44;
+        const r = Math.round(skyTop[0] + (skyBot[0] - skyTop[0]) * t);
+        const gc = Math.round(skyTop[1] + (skyBot[1] - skyTop[1]) * t);
+        const b = Math.round(skyTop[2] + (skyBot[2] - skyTop[2]) * t);
+        g.fillStyle((r << 16) | (gc << 8) | b).fillRect(cx - 70, 22 + i, 140, 2);
+      }
+      // Sun with soft glow
+      g.fillStyle(0xfde68a, 0.4).fillCircle(cx + 40, 36, 12);
+      g.fillStyle(0xfde047).fillCircle(cx + 40, 36, 6);
+      // Distant buildings silhouette
+      g.fillStyle(0x4a3a72).fillRect(cx - 60, 50, 22, 16);
+      g.fillStyle(0x3a2c5a).fillRect(cx - 30, 42, 18, 24);
+      g.fillStyle(0x4a3a72).fillRect(cx, 48, 14, 18);
+      g.fillStyle(0x3a2c5a).fillRect(cx + 18, 40, 18, 26);
+      // Window cross
+      g.lineStyle(2, 0x14172b);
+      g.lineBetween(cx, 22, cx, 66);
+      g.lineBetween(cx - 70, 44, cx + 70, 44);
+      // Sill
+      g.fillStyle(0x2a2f4a).fillRect(cx - 84, 70, 168, 6);
     };
     drawOne(Math.floor(WORLD_W * 0.3));
     drawOne(Math.floor(WORLD_W * 0.7));
@@ -127,10 +155,28 @@ class WorldScene extends Phaser.Scene {
   drawFloor() {
     const g = this.add.graphics();
     const tile = 16;
+    // Wood-plank-style floor with subtle warm tones
     for (let y = Math.floor(FLOOR_TOP / tile); y < Math.ceil(FLOOR_BOTTOM / tile) + 1; y++) {
       for (let x = 0; x < WORLD_W / tile; x++) {
-        const c = (x + y) % 2 === 0 ? 0x3b4654 : 0x2f3845;
-        g.fillStyle(c).fillRect(x * tile, y * tile, tile, tile);
+        const variant = (x * 7 + y * 13) % 5;
+        const palette = [0x2e3354, 0x343a5e, 0x2a2f4a, 0x383e66, 0x2c3152];
+        g.fillStyle(palette[variant]).fillRect(x * tile, y * tile, tile, tile);
+        // Plank seams
+        if (x % 4 === 0) {
+          g.fillStyle(0x1f2240, 0.6).fillRect(x * tile, y * tile, 1, tile);
+        }
+      }
+    }
+    // Subtle vignette darkening at edges
+    const vg = this.add.graphics();
+    vg.fillStyle(0x000000, 0.35).fillRect(0, FLOOR_BOTTOM - 4, WORLD_W, 6);
+    // Soft light pools beneath each window — pure visual ambience
+    const pools = [Math.floor(WORLD_W * 0.3), Math.floor(WORLD_W * 0.7)];
+    for (const cx of pools) {
+      const light = this.add.graphics();
+      light.fillStyle(0xfde68a, 0.06);
+      for (let r = 80; r > 0; r -= 4) {
+        light.fillEllipse(cx, FLOOR_TOP + 30, r, r * 0.4);
       }
     }
   }
@@ -150,6 +196,29 @@ class WorldScene extends Phaser.Scene {
       this.add.rectangle(d.x - 6, d.y - 26, 8, 1, 0x4fc3f7);
       this.add.rectangle(d.x + 4, d.y - 24, 6, 1, 0x81c784);
       this.add.rectangle(d.x - 4, d.y - 22, 10, 1, 0xffb74d);
+    }
+  }
+
+  drawDustMotes() {
+    // Tiny floating dots that drift up — pure ambience
+    for (let i = 0; i < 24; i++) {
+      const x = Math.random() * WORLD_W;
+      const y = FLOOR_TOP + Math.random() * (FLOOR_BOTTOM - FLOOR_TOP);
+      const dot = this.add.circle(x, y, 0.7 + Math.random() * 0.6, 0xfde68a, 0.35);
+      this.tweens.add({
+        targets: dot,
+        y: y - 30 - Math.random() * 30,
+        x: x + (Math.random() - 0.5) * 20,
+        alpha: 0,
+        duration: 6000 + Math.random() * 4000,
+        repeat: -1,
+        yoyo: false,
+        onRepeat: () => {
+          dot.x = Math.random() * WORLD_W;
+          dot.y = FLOOR_BOTTOM - 4;
+          dot.alpha = 0.35;
+        },
+      });
     }
   }
 
@@ -225,11 +294,14 @@ class WorldScene extends Phaser.Scene {
         container.y = startPos.y;
         this.playerLayer.add(container);
 
-        const nameText = (p.name || '?') + (isMe ? ' (YOU)' : '');
+        const nameText = (p.name || '?') + (isMe ? ' ★' : '');
         const tag = this.add.text(startPos.x, startPos.y + 32, nameText, {
-          fontFamily: 'Press Start 2P, monospace', fontSize: '7px',
-          color: isMe ? '#ffd54f' : '#ffffff',
-          backgroundColor: '#000000aa', padding: { left: 4, right: 4, top: 2, bottom: 2 },
+          fontFamily: 'Inter, system-ui, sans-serif', fontSize: '10px',
+          fontStyle: '700',
+          color: isMe ? '#fde68a' : '#f1f5fb',
+          backgroundColor: isMe ? 'rgba(20,23,43,0.85)' : 'rgba(20,23,43,0.7)',
+          padding: { left: 6, right: 6, top: 3, bottom: 3 },
+          stroke: isMe ? '#fde68a' : 'transparent', strokeThickness: isMe ? 1 : 0,
         }).setOrigin(0.5);
         this.playerLayer.add(tag);
 

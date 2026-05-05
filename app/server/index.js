@@ -7,7 +7,7 @@ import { Server } from 'socket.io';
 import {
   createRoom, joinRoom, leaveRoom, selectRole, setReady,
   canStartGame, startGame, getRoom, handleAction, getRoomForSocket,
-  setAvatar, setBotsEnabled, addBotsForEmptyRoles, setGameType,
+  setAvatar, setBotsEnabled, addBotsForEmptyRoles, setGameType, setSalary, resetRoom,
 } from './roomManager.js';
 
 const dev = process.env.NODE_ENV !== 'production';
@@ -68,6 +68,15 @@ app.prepare().then(() => {
       cb && cb({ success: true });
     });
 
+    socket.on('game:setSalary', ({ roomCode, targetPlayerId, salary }, cb) => {
+      const result = setSalary(roomCode, socket.id, targetPlayerId, salary);
+      if (result.error) return cb && cb({ success: false, error: result.error });
+      // Broadcast updated room (so non-game roster also reflects it) and bump engine state.
+      const room = getRoom(roomCode);
+      if (room?.engine) room.engine.broadcastState();
+      cb && cb({ success: true });
+    });
+
     socket.on('room:setBots', ({ roomCode, enabled }, cb) => {
       const result = setBotsEnabled(roomCode, socket.id, enabled);
       if (result.error) return cb && cb({ success: false, error: result.error });
@@ -87,6 +96,14 @@ app.prepare().then(() => {
       if (result.error) return cb({ success: false, error: result.error });
       io.to(roomCode).emit('room:update', sanitizeRoom(result.room));
       cb({ success: true });
+    });
+
+    socket.on('room:playAgain', ({ roomCode }, cb) => {
+      const result = resetRoom(roomCode, socket.id);
+      if (result.error) return cb && cb({ success: false, error: result.error });
+      io.to(roomCode).emit('game:reset', { roomCode });
+      io.to(roomCode).emit('room:update', sanitizeRoom(result.room));
+      cb && cb({ success: true });
     });
 
     socket.on('room:start', ({ roomCode }, cb) => {

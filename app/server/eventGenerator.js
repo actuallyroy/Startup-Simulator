@@ -25,19 +25,36 @@ export function createEventGenerator() {
   };
 }
 
-function pickWeightedEvent(metrics, tick) {
-  const weights = {};
-  for (const key of EVENT_KEYS) weights[key] = 1;
+// Base weights — bad events are common, good events are rare. Running a
+// startup is mostly putting out fires; jackpots should feel like jackpots.
+const BASE_WEIGHTS = {
+  // Bad — frequent
+  trafficSpike: 2.0,
+  serviceCrash: 2.0,
+  bugInjection: 2.5,
+  badReviews: 2.0,
+  costSurge: 1.8,
+  ddosAttack: 1.5,
+  dataLeak: 1.2,
+  competitorLaunch: 2.0,
+  // Good — rare
+  viralMoment: 0.35,
+  techBlogFeature: 0.5,
+};
 
-  if (metrics.errors < 20) weights.bugInjection = 3;
-  if (metrics.users > 1000) weights.trafficSpike = 2;
-  if (metrics.happiness < 40) weights.badReviews = 3;
-  if (metrics.revenue > 2000) weights.costSurge = 2;
-  if (metrics.users > 3000 && metrics.latency > 200) weights.serviceCrash = 3;
-  if (metrics.users > 2000) weights.viralMoment = 1.5;
-  if (tick > 120) { weights.ddosAttack = 2; weights.dataLeak = 1.5; }
-  if (tick > 60) weights.competitorLaunch = 1.5;
-  if (metrics.users > 500) weights.techBlogFeature = 1.5;
+function pickWeightedEvent(metrics, tick) {
+  const weights = { ...BASE_WEIGHTS };
+
+  // Contextual nudges — make conditions actually matter.
+  if (metrics.errors > 30) weights.bugInjection *= 1.5;
+  if (metrics.users > 1000) weights.trafficSpike *= 1.4;
+  if (metrics.happiness < 40) weights.badReviews *= 1.8;
+  if (metrics.revenue > 5000) weights.costSurge *= 1.5;
+  if (metrics.users > 3000 && metrics.latency > 200) weights.serviceCrash *= 1.8;
+  if (tick > 120) { weights.ddosAttack *= 1.4; weights.dataLeak *= 1.4; }
+  // Good events get tiny boosts only when you've earned them.
+  if (metrics.users > 2000) weights.viralMoment *= 1.4;
+  if (metrics.users > 500 && metrics.happiness > 70) weights.techBlogFeature *= 1.4;
 
   const totalWeight = Object.values(weights).reduce((s, w) => s + w, 0);
   let rand = Math.random() * totalWeight;

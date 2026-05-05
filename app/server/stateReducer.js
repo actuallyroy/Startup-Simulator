@@ -20,23 +20,44 @@ export function createInitialState(gameType = null, gameSubtype = null) {
     phase: 'idea',
     gameType, gameSubtype,
     revenueMultiplier: sub?.revenueMultiplier || 1.0,
+    arpu: sub?.arpu || 0.2,
     actionCounts: {},   // team-wide use count per action id
+    preparationPoints: 0, // earned during idea phase, drives pitch funding
+    fundingRaised: 0,
   };
 }
 
-export function applyAction(state, actionId, playerId, playerRole, upgrades) {
+// Probability model:
+//   - Base success chance = 0.85, modified by motivation (±0.20 swing around 50).
+//   - Critical hit (top 10% of success roll): positive deltas ×1.5.
+//   - Failure: positive deltas ×0.3, negative deltas ×1.5.
+//   - Independent bug roll for risky actions (bugRisk on the action), reduced by motivation.
+// Returns { state, outcome: { result, hadBug, hasRoleBonus } } so callers can toast it.
+export function applyAction(state, actionId, playerId, playerRole, upgrades, motivation = 70) {
   const action = ACTIONS[actionId];
-  if (!action) return state;
+  if (!action) return { state, outcome: null };
 
   const roleBonusActions = ROLE_BONUSES[playerRole] || [];
   const hasRoleBonus = roleBonusActions.includes(actionId);
-  const multiplier = hasRoleBonus ? 1.5 : 1.0;
+  const roleMul = hasRoleBonus ? 1.5 : 1.0;
+
+  // Roll for outcome
+  const motMod = ((motivation - 50) / 100) * 0.4; // ±0.20
+  const successChance = Math.max(0.25, Math.min(0.97, 0.85 + motMod));
+  const roll = Math.random();
+  let result;
+  let posMul, negMul;
+  if (roll < successChance * 0.1) { result = 'critical'; posMul = 1.5 * roleMul; negMul = 0.7; }
+  else if (roll < successChance)   { result = 'success';  posMul = 1.0 * roleMul; negMul = 1.0; }
+  else                             { result = 'failure';  posMul = 0.3 * roleMul; negMul = 1.5; }
 
   const newMetrics = { ...state.metrics };
   for (const [metric, delta] of Object.entries(action.effects)) {
     if (newMetrics[metric] === undefined) continue;
-    let effectiveDelta = delta * multiplier;
-    // QA Team upgrade: Ship Feature no longer adds errors
+    // Positive vs negative is metric-aware: errors/latency growing is bad.
+    const isBadMetric = metric === 'errors' || metric === 'latency';
+    const isBeneficial = isBadMetric ? delta < 0 : delta > 0;
+    let effectiveDelta = delta * (isBeneficial ? posMul : negMul);
     if (upgrades.includes('qaTeam') && actionId === 'shipFeature' && metric === 'errors' && delta > 0) {
       effectiveDelta = 0;
     }
@@ -44,12 +65,22 @@ export function applyAction(state, actionId, playerId, playerRole, upgrades) {
     newMetrics[metric] = Math.max(config.min, Math.min(config.max, newMetrics[metric] + effectiveDelta));
   }
 
-  // Auto-scaling cap
+  // Independent bug roll for risky actions; motivation lowers the chance.
+  let hadBug = false;
+  if (action.bugRisk && !(upgrades.includes('qaTeam') && actionId === 'shipFeature')) {
+    const adjBugChance = Math.max(0.05, action.bugRisk - (motivation - 50) / 200);
+    if (Math.random() < adjBugChance) {
+      hadBug = true;
+      const cfg = METRICS_CONFIG.errors;
+      newMetrics.errors = Math.min(cfg.max, newMetrics.errors + (action.bugErrors || 8));
+    }
+  }
+
   if (upgrades.includes('autoScaling')) {
     newMetrics.latency = Math.min(500, newMetrics.latency);
   }
 
-  return { ...state, metrics: newMetrics };
+  return { state: { ...state, metrics: newMetrics }, outcome: { result, hadBug, hasRoleBonus } };
 }
 
 // Event response effects map
@@ -57,12 +88,9 @@ const EVENT_RESPONSE_EFFECTS = {
   trafficSpike: { latency: -80, users: 50 },
   serviceCrash: { errors: -20, latency: -300 },
   bugInjection: { errors: -15, happiness: 3 },
-  badReviews: { happiness: 15, users: 20 },
-  costSurge: { revenue: 60 },
   ddosAttack: { latency: -600, errors: -10 },
   viralMoment: { users: 300, revenue: 40 },
   dataLeak: { happiness: 20, users: 50, errors: -5 },
-  competitorLaunch: { users: 60, happiness: 5 },
   techBlogFeature: { users: 200, revenue: 30 },
 };
 
@@ -96,7 +124,7 @@ export function applyUpgrade(state, upgradeId) {
   return { ...state, metrics: newMetrics, upgrades: [...state.upgrades, upgradeId] };
 }
 
-export function tickState(state, playerCount = 1) {
+export function tickState(state, playerCount = 1, totalSalary = 0) {
   const newMetrics = { ...state.metrics };
   const upgrades = state.upgrades;
 
@@ -122,22 +150,26 @@ export function tickState(state, playerCount = 1) {
     }
   }
 
-  // Revenue from users & happiness — only after launch, scaled by game-type multiplier
-  if (state.phase !== 'idea') {
-    const userFactor = newMetrics.users / 1000;
-    const happinessFactor = newMetrics.happiness / 100;
-    const errorPenalty = newMetrics.errors / 50;
-    const mult = state.revenueMultiplier || 1.0;
-    const revenueGain = Math.round((userFactor * happinessFactor * 10 - errorPenalty * 5) * mult);
-    newMetrics.revenue = Math.max(METRICS_CONFIG.revenue.min, Math.min(METRICS_CONFIG.revenue.max, newMetrics.revenue + revenueGain));
-  }
-
-  // Burn rate — server costs + salaries every tick once the company exists.
-  // Idea phase has no burn; the team is just sketching.
+  // Income — users × ARPU × happiness × type-multiplier, minus error penalty.
+  // Burn — server costs + salaries every tick once the company exists.
+  // Idea phase: no income, no burn.
+  let income = 0;
   let burn = 0;
   if (state.phase !== 'idea') {
-    burn = GAME_CONFIG.BURN_BASE + GAME_CONFIG.BURN_PER_PLAYER * Math.max(1, playerCount);
-    newMetrics.revenue = Math.max(METRICS_CONFIG.revenue.min, newMetrics.revenue - burn);
+    const arpu = state.arpu || 0;
+    const happinessFactor = newMetrics.happiness / 100;
+    const mult = state.revenueMultiplier || 1.0;
+    const errorPenalty = newMetrics.errors * 0.4; // bugs cost real money
+    income = Math.max(0, Math.round(newMetrics.users * arpu * happinessFactor * mult - errorPenalty));
+    // Burn = fixed overhead + salaries + server cost (linear + quadratic in users).
+    // The quadratic term means doubling users more than doubles infra cost.
+    const u = newMetrics.users;
+    const serverCost = u * GAME_CONFIG.SERVER_COST_PER_USER + u * u * GAME_CONFIG.SERVER_COST_QUADRATIC;
+    burn = Math.round(GAME_CONFIG.BURN_BASE + totalSalary + serverCost);
+    newMetrics.revenue = Math.max(
+      METRICS_CONFIG.revenue.min,
+      Math.min(METRICS_CONFIG.revenue.max, newMetrics.revenue + income - burn),
+    );
   }
 
   // Cross-metric effects
@@ -155,7 +187,7 @@ export function tickState(state, playerCount = 1) {
   else if (newMetrics.users >= 500) stage = 1;
   if (upgrades.includes('seriesAOffice') && stage < 2) stage = 2;
 
-  return { ...state, metrics: newMetrics, activeEvents, tick: state.tick + 1, stage, lastBurn: burn };
+  return { ...state, metrics: newMetrics, activeEvents, tick: state.tick + 1, stage, lastBurn: burn, lastIncome: income };
 }
 
 export function calculateScores(state, players) {

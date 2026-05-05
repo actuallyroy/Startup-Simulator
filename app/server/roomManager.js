@@ -42,6 +42,8 @@ export function createRoom(hostSocketId, hostName) {
     busyUntil: 0,
     busyAction: null,
     busyTotal: 0,
+    salary: GAME_CONFIG.SALARY_DEFAULT,
+    motivation: 70,
     avatar: randomAvatar(),
   };
 
@@ -80,6 +82,8 @@ export function joinRoom(roomCode, socketId, playerName) {
     busyUntil: 0,
     busyAction: null,
     busyTotal: 0,
+    salary: GAME_CONFIG.SALARY_DEFAULT,
+    motivation: 70,
     avatar: randomAvatar(),
   };
 
@@ -114,6 +118,19 @@ export function setGameType(roomCode, socketId, gameType, gameSubtype) {
   room.gameType = gameType;
   if (gameSubtype) room.gameSubtype = gameSubtype;
   return { room };
+}
+
+export function setSalary(roomCode, socketId, targetPlayerId, salary) {
+  const room = rooms.get(roomCode);
+  if (!room) return { error: 'Room not found' };
+  const me = room.players[socketId];
+  if (!me) return { error: 'Player not in room' };
+  if (me.role !== 'hr') return { error: 'Only HR can set salaries' };
+  const target = room.players[targetPlayerId];
+  if (!target) return { error: 'Target not in room' };
+  const clamped = Math.max(GAME_CONFIG.SALARY_MIN, Math.min(GAME_CONFIG.SALARY_MAX, Math.round(salary)));
+  target.salary = clamped;
+  return { room, target };
 }
 
 export function setBotsEnabled(roomCode, socketId, enabled) {
@@ -154,6 +171,7 @@ export function addBotsForEmptyRoles(roomCode) {
     room.players[id] = {
       id, name, role, ready: true,
       actionsUsed: 0, busyUntil: 0, busyAction: null, busyTotal: 0,
+      salary: GAME_CONFIG.SALARY_DEFAULT, motivation: 70,
       avatar: randomAvatar(),
       isBot: true,
     };
@@ -263,4 +281,35 @@ export function endGame(roomCode) {
   if (room.engine) {
     room.engine.stop();
   }
+}
+
+// Send everyone back to the lobby with a fresh state. Keeps players, avatars,
+// game type and bot setting; resets per-round counters.
+export function resetRoom(roomCode, socketId) {
+  const room = rooms.get(roomCode);
+  if (!room) return { error: 'Room not found' };
+  if (room.host !== socketId) return { error: 'Only host can restart' };
+
+  if (room.engine) {
+    room.engine.stop();
+    room.engine = null;
+  }
+  room.state = ROOM_STATES.LOBBY;
+
+  // Strip bots — host can re-enable them on the next round.
+  for (const [id, p] of Object.entries(room.players)) {
+    if (p.isBot) {
+      delete room.players[id];
+      continue;
+    }
+    p.ready = false;
+    p.actionsUsed = 0;
+    p.busyUntil = 0;
+    p.busyAction = null;
+    p.busyTotal = 0;
+    p.position = null;
+    p.salary = GAME_CONFIG.SALARY_DEFAULT;
+    p.motivation = 70;
+  }
+  return { room };
 }

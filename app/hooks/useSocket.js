@@ -43,6 +43,22 @@ export function useSocket() {
     socket.on('game:start', () => setGamePhase('playing'));
     socket.on('game:state', (gs) => updateGameState(gs));
     socket.on('game:end', ({ reason, scores }) => setScores(scores, reason));
+    socket.on('game:reset', () => {
+      const s = useGameStore.getState();
+      // Reset per-round state but keep playerName / roomCode / avatar.
+      useGameStore.setState({
+        gamePhase: 'lobby',
+        scores: null, endReason: null,
+        metrics: null, activeEvents: [], eventHistory: [], actionHistory: [],
+        tick: 0, stage: 0, timeRemaining: 300, phase: 'idea',
+        milestone: null, winCondition: null, lastBurn: 0, lastIncome: 0, arpu: 0,
+        preparationPoints: 0, fundingRaised: 0,
+        actionCounts: {}, upgrades: [], objectives: [], objectivesCompleted: 0,
+        bonusScore: 0, pendingDelegation: null, actionToasts: [], chatBubbles: {},
+        myActionsUsed: 0, myBusyRemaining: 0, myBusyTotal: 0, myBusyAction: null,
+        myMotivation: 70, mySalary: 50,
+      });
+    });
 
     // Events
     socket.on('game:event', ({ eventId, event }) => {
@@ -74,10 +90,32 @@ export function useSocket() {
       scenePublish('action:performed', { playerId, actionEmoji });
     });
 
+    // Action outcome (probability roll result)
+    socket.on('game:actionOutcome', ({ playerName, actionName, actionEmoji, result, hadBug }) => {
+      const myId = useGameStore.getState().socketId;
+      // Only toast notable outcomes — successes are the default and would spam.
+      if (result === 'critical') {
+        addActionToast({ message: `🌟 ${playerName} CRUSHED ${actionEmoji} ${actionName}!`, type: 'success' });
+      } else if (result === 'failure') {
+        addActionToast({ message: `💥 ${playerName} botched ${actionEmoji} ${actionName}`, type: 'warning' });
+      }
+      if (hadBug) {
+        addActionToast({ message: `🐞 Bugs introduced by ${actionName}!`, type: 'error' });
+      }
+    });
+
     // Upgrades
     socket.on('game:upgradePurchased', ({ upgradeName, upgradeEmoji, playerName }) => {
       addActionToast({
         message: `${upgradeEmoji} ${playerName} bought ${upgradeName}!`,
+        type: 'success',
+      });
+    });
+
+    // Pitch funding
+    socket.on('game:funded', ({ funding, prep }) => {
+      addActionToast({
+        message: `💰 Investors funded $${funding.toLocaleString()} (${prep} prep pts)!`,
         type: 'success',
       });
     });

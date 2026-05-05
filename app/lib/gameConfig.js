@@ -3,35 +3,48 @@
 export const GAME_CONFIG = {
   TICK_RATE: 2000,        // 2s per tick — gives players time to think
   ROUND_DURATION: 300,    // 300 ticks × 2s = 10 minutes
-  MAX_PLAYERS: 5,
+  MAX_PLAYERS: 6,
   MAX_ACTIONS_PER_ROUND: 60,
   ROOM_CODE_LENGTH: 4,
-  EVENT_GRACE_TICKS: 30,  // No events during first ~minute of real time
-  LAUNCH_USER_THRESHOLD: 50,    // Hitting this flips phase to "growth"
-  // Stakes: burn rate eats revenue every tick once you've launched
-  BURN_BASE: 15,          // Server / utilities baseline
-  BURN_PER_PLAYER: 10,    // Salary per teammate (incl. bots)
+  EVENT_GRACE_TICKS: 30,
+  LAUNCH_USER_THRESHOLD: 50,
+  BURN_BASE: 15,                  // Fixed overhead (salaries are per-player; servers scale with users)
+  // Server cost per tick = users × PER_USER + users² × QUADRATIC.
+  // Linear keeps tiny startups cheap; quadratic punishes growth without optimization.
+  SERVER_COST_PER_USER: 0.04,
+  SERVER_COST_QUADRATIC: 0.000005,
+  // Salary system — HR can adjust each player's salary; motivation tracks it.
+  SALARY_MIN: 20,
+  SALARY_DEFAULT: 50,
+  SALARY_MAX: 250,
+  MOTIVATION_DECAY: 0.5,
+  // Funding system — work done in idea phase determines pitch outcome.
+  FUNDING_BASE: 30000,            // Minimum if you just walk in with nothing
+  FUNDING_PER_POINT: 3000,        // Each prep point unlocks more runway
+  FUNDING_CAP: 200000,
 };
 
 // What "winning" looks like — set per startup sub-type. Reach this and you
 // trigger an early Victory end screen. Otherwise the round just expires.
+// Win thresholds are well above the $200k pitch-funding cap so getting funded
+// alone never triggers victory — you have to grow the company.
 export const WIN_CONDITIONS = {
-  saas:        { metric: 'revenue',   value: 10000, label: 'Reach $10,000 revenue' },
-  mobileApp:   { metric: 'users',     value: 4000,  label: 'Reach 4,000 users' },
-  ecommerce:   { metric: 'revenue',   value: 12000, label: 'Reach $12,000 revenue' },
-  gameStudio:  { metric: 'users',     value: 3000,  label: 'Reach 3,000 happy players' },
-  agency:      { metric: 'revenue',   value: 15000, label: 'Reach $15,000 revenue' },
-  consulting:  { metric: 'revenue',   value: 18000, label: 'Reach $18,000 revenue' },
-  marketplace: { metric: 'users',     value: 4500,  label: 'Reach 4,500 users' },
-  freelance:   { metric: 'revenue',   value: 7000,  label: 'Reach $7,000 revenue' },
+  saas:        { metric: 'revenue',   value: 350000, label: 'Reach $350k revenue' },
+  mobileApp:   { metric: 'users',     value: 8000,   label: 'Reach 8,000 users' },
+  ecommerce:   { metric: 'revenue',   value: 400000, label: 'Reach $400k revenue' },
+  gameStudio:  { metric: 'users',     value: 6000,   label: 'Reach 6,000 players' },
+  agency:      { metric: 'revenue',   value: 450000, label: 'Reach $450k revenue' },
+  consulting:  { metric: 'revenue',   value: 500000, label: 'Reach $500k revenue' },
+  marketplace: { metric: 'users',     value: 8000,   label: 'Reach 8,000 users' },
+  freelance:   { metric: 'revenue',   value: 280000, label: 'Reach $280k revenue' },
 };
 
 // Fixed staircase of milestones — one per phase. The currently-active one is
 // pinned in the HUD so players always know what's next.
 export const PHASE_MILESTONES = {
-  idea:   { id: 'shipMvp',     description: 'Ship the MVP to launch your company', check: (m, s) => s.phase !== 'idea', reward: { revenue: 200 } },
-  launch: { id: 'reach100',    description: 'Reach 100 users to enter Growth phase', check: (m) => m.users >= 100,  reward: { revenue: 300 } },
-  growth: { id: 'reach5kRev',  description: 'Reach $5,000 revenue', check: (m) => m.revenue >= 5000, reward: { revenue: 500 } },
+  idea:   { id: 'shipMvp',      description: 'Pitch investors to launch your company', check: (m, s) => s.phase !== 'idea', reward: { revenue: 0 } },
+  launch: { id: 'reach100',     description: 'Reach 100 users to enter Growth phase', check: (m) => m.users >= 100, reward: { revenue: 500 } },
+  growth: { id: 'reach1kUsers', description: 'Reach 1,000 users', check: (m) => m.users >= 1000, reward: { revenue: 2000 } },
 };
 
 export const PHASES = {
@@ -47,20 +60,21 @@ export const GAME_TYPES = {
     label: 'Product Business',
     emoji: '📦',
     subtypes: {
-      saas:        { name: 'SaaS',        emoji: '☁️', startRevenue: 1000, revenueMultiplier: 1.2, startUsers: 0 },
-      mobileApp:   { name: 'Mobile App',  emoji: '📱', startRevenue: 800,  revenueMultiplier: 0.9, startUsers: 0 },
-      ecommerce:   { name: 'E-commerce',  emoji: '🛒', startRevenue: 1200, revenueMultiplier: 1.1, startUsers: 0 },
-      gameStudio:  { name: 'Game Studio', emoji: '🎮', startRevenue: 600,  revenueMultiplier: 1.0, startUsers: 0 },
+      // arpu = revenue per user per tick at 100% happiness, 1× multiplier
+      saas:        { name: 'SaaS',        emoji: '☁️', startRevenue: 1000, arpu: 0.50, revenueMultiplier: 1.2, startUsers: 0 },
+      mobileApp:   { name: 'Mobile App',  emoji: '📱', startRevenue: 800,  arpu: 0.15, revenueMultiplier: 1.0, startUsers: 0 },
+      ecommerce:   { name: 'E-commerce',  emoji: '🛒', startRevenue: 1200, arpu: 0.30, revenueMultiplier: 1.1, startUsers: 0 },
+      gameStudio:  { name: 'Game Studio', emoji: '🎮', startRevenue: 600,  arpu: 0.20, revenueMultiplier: 1.0, startUsers: 0 },
     },
   },
   service: {
     label: 'Service Business',
     emoji: '🛠️',
     subtypes: {
-      agency:      { name: 'Agency',      emoji: '🏢', startRevenue: 1500, revenueMultiplier: 1.4, startUsers: 0 },
-      consulting:  { name: 'Consulting',  emoji: '💼', startRevenue: 1500, revenueMultiplier: 1.6, startUsers: 0 },
-      marketplace: { name: 'Marketplace', emoji: '🤝', startRevenue: 800,  revenueMultiplier: 1.0, startUsers: 0 },
-      freelance:   { name: 'Freelance',   emoji: '💻', startRevenue: 500,  revenueMultiplier: 1.3, startUsers: 0 },
+      agency:      { name: 'Agency',      emoji: '🏢', startRevenue: 1500, arpu: 0.80, revenueMultiplier: 1.2, startUsers: 0 },
+      consulting:  { name: 'Consulting',  emoji: '💼', startRevenue: 1500, arpu: 1.20, revenueMultiplier: 1.4, startUsers: 0 },
+      marketplace: { name: 'Marketplace', emoji: '🤝', startRevenue: 800,  arpu: 0.25, revenueMultiplier: 1.0, startUsers: 0 },
+      freelance:   { name: 'Freelance',   emoji: '💻', startRevenue: 500,  arpu: 0.60, revenueMultiplier: 1.2, startUsers: 0 },
     },
   },
 };
@@ -101,6 +115,13 @@ export const ROLES = {
     color: '#ef5350',
     description: 'Wild card — can sabotage or supercharge anything',
   },
+  HR: {
+    id: 'hr',
+    name: 'HR Manager',
+    emoji: '👔',
+    color: '#fbcfe8',
+    description: 'People — sets salaries that drive teammate motivation',
+  },
 };
 
 // Role bonus multipliers: if your role matches, action effects are 1.5x
@@ -108,8 +129,9 @@ export const ROLE_BONUSES = {
   backend: ['fixBug', 'optimizeApi', 'codeReview', 'writeTests', 'refactorCode'],
   frontend: ['shipFeature', 'improveUx', 'abTest', 'darkMode', 'mobileOptimize'],
   devops: ['scaleInfra', 'addCache', 'setupCiCd', 'addMonitoring', 'rollback'],
-  pm: ['boostFeature', 'reduceChaos', 'runSprint', 'teamLunch', 'pivotStrategy'],
+  pm: ['boostFeature', 'reduceChaos', 'runSprint', 'pivotStrategy', 'raiseRound'],
   chaos: ['triggerIncident', 'marketShift', 'hackathon', 'allNighter', 'coffeeRun'],
+  hr: ['teamLunch', 'coffeeRun', 'runSprint', 'publicApology'],
 };
 
 // ========================
@@ -126,25 +148,82 @@ export const ACTION_CATEGORIES = {
   strategy: { name: '💡 Strategy', description: 'Long-term plays' },
 };
 
+// Pre-launch sub-categories — only shown during the idea phase
+export const IDEA_CATEGORIES = {
+  'idea-product':  { name: '🧩 Product',  description: 'Build the thing' },
+  'idea-research': { name: '🔍 Research', description: 'Validate the market' },
+  'idea-pitch':    { name: '🎤 Pitch',    description: 'Raise funding' },
+};
+
 export const ACTIONS = {
-  // ── IDEA PHASE (only these are available before MVP launches) ──
-  validateIdea: {
-    id: 'validateIdea', name: 'Validate Idea', emoji: '💡', cooldown: 4, category: 'engineering',
-    description: 'Sketch the idea on a whiteboard — clarifies direction',
+  // ── PRE-LAUNCH: PRODUCT (build the thing) ──
+  sketchWireframes: {
+    id: 'sketchWireframes', name: 'Wireframes', emoji: '✏️', cooldown: 4, category: 'idea-product',
+    description: 'Sketch UI flows — clarifies what to build (+2 prep)',
+    effects: { happiness: 3 },
+    phase: 'idea', preparationPoints: 2, maxUses: 2,
+  },
+  buildPrototype: {
+    id: 'buildPrototype', name: 'Build Prototype', emoji: '🧩', cooldown: 6, category: 'idea-product',
+    description: 'Working clickable prototype (+4 prep)',
     effects: { happiness: 5 },
-    phase: 'idea',
-    maxUses: 2,
+    phase: 'idea', preparationPoints: 4, maxUses: 2,
+  },
+  codeBackend: {
+    id: 'codeBackend', name: 'Code Backend', emoji: '⚙️', cooldown: 5, category: 'idea-product',
+    description: 'Set up servers + database (+3 prep)',
+    effects: { happiness: 4 },
+    phase: 'idea', preparationPoints: 3, maxUses: 2,
+  },
+  qaTest: {
+    id: 'qaTest', name: 'QA Pass', emoji: '🧪', cooldown: 4, category: 'idea-product',
+    description: 'Find bugs before users do (+2 prep)',
+    effects: { happiness: 3 },
+    phase: 'idea', preparationPoints: 2, maxUses: 2,
+  },
+
+  // ── PRE-LAUNCH: RESEARCH ──
+  marketResearch: {
+    id: 'marketResearch', name: 'Market Research', emoji: '📊', cooldown: 5, category: 'idea-research',
+    description: 'Study the market — sharpens positioning (+3 prep)',
+    effects: { happiness: 4 },
+    phase: 'idea', preparationPoints: 3, maxUses: 2,
+  },
+  competitorAnalysis: {
+    id: 'competitorAnalysis', name: 'Competitor Scan', emoji: '🔍', cooldown: 4, category: 'idea-research',
+    description: 'Map competitor strengths & gaps (+2 prep)',
+    effects: { happiness: 3 },
+    phase: 'idea', preparationPoints: 2, maxUses: 2,
   },
   talkToUsers: {
-    id: 'talkToUsers', name: 'Talk to Users', emoji: '🗣️', cooldown: 5, category: 'product',
-    description: 'Interview potential users — refines the idea, no signups yet',
-    effects: { happiness: 8 },
-    phase: 'idea',
-    maxUses: 3,
+    id: 'talkToUsers', name: 'User Interview', emoji: '🗣️', cooldown: 3, category: 'idea-research',
+    description: 'Talk to potential users — short, frequent (+1 prep each)',
+    effects: { happiness: 5 },
+    phase: 'idea', preparationPoints: 1, maxUses: 5,
   },
-  buildMvp: {
-    id: 'buildMvp', name: 'Build MVP', emoji: '🛠️', cooldown: 8, category: 'engineering',
-    description: 'Ship the first working version — launches the company!',
+  userSurvey: {
+    id: 'userSurvey', name: 'Run Survey', emoji: '📝', cooldown: 5, category: 'idea-research',
+    description: 'Quantitative survey across many users (+2 prep)',
+    effects: { happiness: 4 },
+    phase: 'idea', preparationPoints: 2, maxUses: 2,
+  },
+
+  // ── PRE-LAUNCH: PITCH ──
+  writePitchDeck: {
+    id: 'writePitchDeck', name: 'Pitch Deck', emoji: '📑', cooldown: 5, category: 'idea-pitch',
+    description: 'Write the deck — story, numbers, ask (+3 prep)',
+    effects: { happiness: 4 },
+    phase: 'idea', preparationPoints: 3, maxUses: 2,
+  },
+  practicePitch: {
+    id: 'practicePitch', name: 'Practice Pitch', emoji: '🎤', cooldown: 3, category: 'idea-pitch',
+    description: 'Rehearse — smoother delivery (+1 prep each)',
+    effects: { happiness: 3 },
+    phase: 'idea', preparationPoints: 1, maxUses: 4,
+  },
+  pitchInvestors: {
+    id: 'pitchInvestors', name: 'Pitch Investors', emoji: '💰', cooldown: 8, category: 'idea-pitch',
+    description: 'Pitch for funding — launches the company! Funding scales with your prep.',
     effects: { users: 30, happiness: 10 },
     phase: 'idea',
     launchesGame: true,
@@ -176,33 +255,38 @@ export const ACTIONS = {
     id: 'refactorCode', name: 'Refactor', emoji: '♻️', cooldown: 6, category: 'engineering',
     description: 'Clean up tech debt for long-term gains',
     effects: { errors: -5, latency: -30, happiness: 5 },
+    motivationFloor: 60,
   },
 
   // ── PRODUCT ──
   shipFeature: {
     id: 'shipFeature', name: 'Ship Feature', emoji: '🚀', cooldown: 4, category: 'product',
-    description: 'Launch a new feature to attract users',
-    effects: { users: 80, errors: 3, revenue: 20 },
+    description: 'Launch a new feature to attract users (dev cost: $80, bug risk!)',
+    effects: { users: 80, errors: 3, revenue: -80 },
+    motivationFloor: 50, bugRisk: 0.4, bugErrors: 12,
   },
   improveUx: {
     id: 'improveUx', name: 'Improve UX', emoji: '✨', cooldown: 3, category: 'product',
-    description: 'Polish the user experience and UI',
-    effects: { happiness: 12, users: 25 },
+    description: 'Polish the experience (cost: $40)',
+    effects: { happiness: 12, users: 25, revenue: -40 },
   },
   abTest: {
     id: 'abTest', name: 'A/B Test', emoji: '🔬', cooldown: 5, category: 'product',
-    description: 'Run an experiment to optimize conversion',
-    effects: { users: 40, revenue: 30 },
+    description: 'Experiment to optimize conversion (cost: $60)',
+    effects: { users: 40, revenue: -60 },
+    motivationFloor: 50,
   },
   darkMode: {
     id: 'darkMode', name: 'Dark Mode', emoji: '🌙', cooldown: 6, category: 'product',
-    description: 'Add dark mode — users love it!',
-    effects: { happiness: 15, users: 60 },
+    description: 'Add dark mode — users love it! (cost: $50)',
+    effects: { happiness: 15, users: 60, revenue: -50 },
+    motivationFloor: 50,
   },
   mobileOptimize: {
     id: 'mobileOptimize', name: 'Mobile Optimize', emoji: '📱', cooldown: 5, category: 'product',
-    description: 'Optimize for mobile devices',
-    effects: { users: 100, happiness: 8, latency: -20 },
+    description: 'Optimize for mobile (cost: $100, bug risk)',
+    effects: { users: 100, happiness: 8, latency: -20, revenue: -100 },
+    motivationFloor: 55, bugRisk: 0.3, bugErrors: 8,
   },
 
   // ── INFRASTRUCTURE ──
@@ -220,11 +304,13 @@ export const ACTIONS = {
     id: 'setupCiCd', name: 'Setup CI/CD', emoji: '🔄', cooldown: 7, category: 'infrastructure',
     description: 'Automate deployments — faster shipping',
     effects: { errors: -10, happiness: 5 },
+    motivationFloor: 55,
   },
   addMonitoring: {
     id: 'addMonitoring', name: 'Add Monitoring', emoji: '📊', cooldown: 6, category: 'infrastructure',
     description: 'Set up alerts and dashboards',
     effects: { errors: -8, latency: -20 },
+    motivationFloor: 50,
   },
   rollback: {
     id: 'rollback', name: 'Rollback Deploy', emoji: '⏪', cooldown: 2, category: 'emergency',
@@ -247,16 +333,19 @@ export const ACTIONS = {
     id: 'runSprint', name: 'Sprint Planning', emoji: '📝', cooldown: 7, category: 'team',
     description: 'Organize priorities and boost efficiency',
     effects: { happiness: 10, errors: -5 },
+    motivationFloor: 40,
   },
   allNighter: {
     id: 'allNighter', name: 'All-Nighter', emoji: '🌃', cooldown: 8, category: 'team',
-    description: 'Pull an all-nighter — big output, morale hit',
+    description: 'Pull an all-nighter — big output, morale hit, bug risk',
     effects: { users: 120, errors: 10, happiness: -15, latency: -40 },
+    motivationFloor: 80, bugRisk: 0.5, bugErrors: 15,
   },
   hackathon: {
     id: 'hackathon', name: 'Hackathon', emoji: '💡', cooldown: 8, category: 'team',
-    description: '24hr innovation sprint — wild results!',
-    effects: { users: 80, revenue: 40, errors: 8, happiness: 10 },
+    description: '24hr innovation sprint — wild results, pricey, bug risk',
+    effects: { users: 80, revenue: -100, errors: 8, happiness: 10 },
+    motivationFloor: 70, bugRisk: 0.4, bugErrors: 10,
   },
 
   // ── EMERGENCY ──
@@ -269,11 +358,13 @@ export const ACTIONS = {
     id: 'restartService', name: 'Restart Service', emoji: '🔁', cooldown: 4, category: 'emergency',
     description: 'Turn it off and on again',
     effects: { latency: -200, errors: -10, users: -30 },
+    motivationFloor: 45,
   },
   callExpert: {
     id: 'callExpert', name: 'Call Expert', emoji: '🧙', cooldown: 7, category: 'emergency',
     description: 'Bring in a consultant to help',
     effects: { errors: -20, latency: -80, revenue: -40 },
+    motivationFloor: 45,
   },
   publicApology: {
     id: 'publicApology', name: 'Public Apology', emoji: '📢', cooldown: 6, category: 'emergency',
@@ -284,8 +375,9 @@ export const ACTIONS = {
   // ── STRATEGY ──
   boostFeature: {
     id: 'boostFeature', name: 'Marketing Push', emoji: '📣', cooldown: 5, category: 'strategy',
-    description: 'Run ads and social media campaigns',
-    effects: { users: 150, revenue: -20 },
+    description: 'Run ads and social campaigns — pricey but moves the needle',
+    effects: { users: 150, revenue: -180 },
+    motivationFloor: 50,
   },
   reduceChaos: {
     id: 'reduceChaos', name: 'Stabilize', emoji: '🧘', cooldown: 4, category: 'strategy',
@@ -296,18 +388,22 @@ export const ACTIONS = {
     id: 'pivotStrategy', name: 'Pivot!', emoji: '🔀', cooldown: 8, category: 'strategy',
     description: 'Change product direction — risky but rewarding',
     effects: { users: -50, revenue: 80, happiness: -5 },
+    motivationFloor: 75,
     roleLock: 'pm',
   },
   raiseRound: {
     id: 'raiseRound', name: 'Raise Funding', emoji: '💰', cooldown: 8, category: 'strategy',
-    description: 'Pitch to investors for more runway',
-    effects: { revenue: 200 },
+    description: 'Pitch to investors — major cash injection',
+    effects: { revenue: 1500 },
+    motivationFloor: 65,
     roleLock: 'pm',
+    maxUses: 2,
   },
   acquihire: {
     id: 'acquihire', name: 'Acqui-hire', emoji: '🤝', cooldown: 8, category: 'strategy',
     description: 'Acquire a small team for talent',
     effects: { errors: -15, happiness: 10, revenue: -50 },
+    motivationFloor: 65,
     roleLock: 'pm',
   },
 
@@ -316,12 +412,14 @@ export const ACTIONS = {
     id: 'triggerIncident', name: 'Trigger Incident', emoji: '💥', cooldown: 6, category: 'emergency',
     description: 'Deliberately cause chaos',
     effects: { errors: 25, latency: 200, happiness: -10 },
+    motivationFloor: 50,
     roleLock: 'chaos',
   },
   marketShift: {
     id: 'marketShift', name: 'Market Crash', emoji: '🌊', cooldown: 8, category: 'strategy',
     description: 'Trigger a market downturn',
     effects: { users: -150, revenue: -60 },
+    motivationFloor: 60,
     roleLock: 'chaos',
   },
 };
@@ -344,13 +442,13 @@ export const EVENTS = {
   },
   badReviews: {
     id: 'badReviews', name: 'Bad Reviews! ⭐',
-    description: 'Users are leaving 1-star reviews!',
-    severity: 'info', effects: { happiness: -20, users: -50 }, duration: 12,
+    description: 'Reviews are already public. The damage is done.',
+    severity: 'warning', effects: { happiness: -25, users: -80 }, duration: 12,
   },
   costSurge: {
     id: 'costSurge', name: 'Cost Surge! 💸',
-    description: 'Cloud costs just tripled overnight!',
-    severity: 'warning', effects: { revenue: -100 }, duration: 10,
+    description: 'Cloud bill spiked. You signed the contract — pay up.',
+    severity: 'warning', effects: { revenue: -180 }, duration: 10,
   },
   ddosAttack: {
     id: 'ddosAttack', name: 'DDoS Attack! 🛡️',
@@ -369,8 +467,8 @@ export const EVENTS = {
   },
   competitorLaunch: {
     id: 'competitorLaunch', name: 'Competitor Launch! ⚔️',
-    description: 'A competitor just launched a similar product!',
-    severity: 'warning', effects: { users: -80, happiness: -10 }, duration: 20,
+    description: 'A rival shipped what you were building. The market shifted.',
+    severity: 'warning', effects: { users: -130, happiness: -15 }, duration: 20,
   },
   techBlogFeature: {
     id: 'techBlogFeature', name: 'TechCrunch Feature! 📰',
@@ -383,7 +481,7 @@ export const METRICS_CONFIG = {
   users: { name: 'Users', emoji: '👥', start: 0, min: 0, max: 10000, decayRate: 0, growthRate: 0, color: '#4fc3f7' },
   errors: { name: 'Errors', emoji: '🐛', start: 0, min: 0, max: 100, decayRate: 0, growthRate: 0, color: '#ef5350' },
   latency: { name: 'Latency', emoji: '⚡', start: 20, min: 10, max: 5000, decayRate: 0, growthRate: 0, unit: 'ms', color: '#ffb74d' },
-  revenue: { name: 'Revenue', emoji: '💰', start: 1000, min: 0, max: 100000, decayRate: 0, growthRate: 0, unit: '$', color: '#81c784' },
+  revenue: { name: 'Revenue', emoji: '💰', start: 1000, min: 0, max: 1000000, decayRate: 0, growthRate: 0, unit: '$', color: '#81c784' },
   happiness: { name: 'Happiness', emoji: '😊', start: 80, min: 0, max: 100, decayRate: -0.2, growthRate: 0, unit: '%', color: '#ce93d8' },
 };
 
@@ -477,11 +575,11 @@ export const EVENT_RESPONSES = {
   trafficSpike: { label: '📈 Scale Up', effects: { latency: -80, users: 50 }, description: 'Spin up extra capacity' },
   serviceCrash: { label: '🔧 Emergency Fix', effects: { errors: -20, latency: -300 }, description: 'All hands on deck' },
   bugInjection: { label: '🐛 Bug Sweep', effects: { errors: -15, happiness: 3 }, description: 'Rapid triage' },
-  badReviews: { label: '📢 Respond Publicly', effects: { happiness: 15, users: 20 }, description: 'Transparent communication' },
-  costSurge: { label: '💡 Optimize Spend', effects: { revenue: 60 }, description: 'Cut unnecessary costs' },
+  // badReviews: unavoidable — reviews are already public.
+  // costSurge: unavoidable — invoice already due.
   ddosAttack: { label: '🛡️ Activate Shield', effects: { latency: -600, errors: -10 }, description: 'Enable DDoS protection' },
   viralMoment: { label: '🎯 Capitalize', effects: { users: 300, revenue: 40 }, description: 'Double down on the moment' },
   dataLeak: { label: '🔒 Incident Response', effects: { happiness: 20, users: 50, errors: -5 }, description: 'Transparent disclosure' },
-  competitorLaunch: { label: '⚔️ Counter-launch', effects: { users: 60, happiness: 5 }, description: 'Ship your killer feature' },
+  // competitorLaunch: unavoidable — they already shipped.
   techBlogFeature: { label: '📣 Amplify', effects: { users: 200, revenue: 30 }, description: 'Share it everywhere' },
 };

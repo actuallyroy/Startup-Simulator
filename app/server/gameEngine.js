@@ -57,8 +57,9 @@ export class GameEngine {
   tick() {
     if (!this.isRunning) return;
     this.updateCooldowns();
-    const playerCount = Object.keys(this.room.players).length;
-    this.state = tickState(this.state, playerCount);
+    this.tickMotivation();
+    const totalSalary = Object.values(this.room.players).reduce((s, p) => s + (p.salary || 0), 0);
+    this.state = tickState(this.state, Object.keys(this.room.players).length, totalSalary);
     this.checkObjectives();
     this.checkPhaseMilestone();
     this.runBots();
@@ -220,6 +221,10 @@ export class GameEngine {
         return { error: `Already used ${action.maxUses} times this round` };
       }
     }
+    // Motivation gate: too checked-out to do hard work
+    if (action.motivationFloor && (player.motivation || 0) < action.motivationFloor) {
+      return { error: `Need motivation ≥${action.motivationFloor} (you're at ${Math.round(player.motivation || 0)})` };
+    }
     // Global busy lock: while doing one action, all others are gated.
     const busyRemaining = (player.busyUntil || 0) - this.state.tick;
     if (busyRemaining > 0) {
@@ -229,12 +234,18 @@ export class GameEngine {
       return { error: 'Max actions reached' };
     }
 
-    this.state = applyAction(this.state, actionId, socketId, player.role, this.state.upgrades);
+    const applied = applyAction(this.state, actionId, socketId, player.role, this.state.upgrades, player.motivation || 70);
+    this.state = applied.state;
+    const outcome = applied.outcome;
 
     let duration = action.cooldown;
     if (this.state.upgrades.includes('cicdPipeline')) {
       duration = Math.max(1, Math.ceil(duration * 0.8));
     }
+    // Motivation also scales duration: 100 mot → 1.0×, 0 mot → 1.6× slower
+    const mot = player.motivation || 70;
+    const motMul = 1 + (1 - mot / 100) * 0.6;
+    duration = Math.max(1, Math.ceil(duration * motMul));
     player.busyUntil = this.state.tick + duration;
     player.busyAction = actionId;
     player.busyTotal = duration;
@@ -247,10 +258,33 @@ export class GameEngine {
       this.state = { ...this.state, actionCounts: counts };
     }
 
-    // Ship MVP → flips game out of the idea phase
+    // Pre-launch prep accumulates points that determine pitch funding
+    if (action.preparationPoints) {
+      this.state = {
+        ...this.state,
+        preparationPoints: (this.state.preparationPoints || 0) + action.preparationPoints,
+      };
+    }
+
+    // Pitch to investors → funding awarded based on prep, then enter launch phase
     if (action.launchesGame && this.state.phase === 'idea') {
-      this.state = { ...this.state, phase: 'launch' };
+      const prep = this.state.preparationPoints || 0;
+      const funding = Math.min(
+        GAME_CONFIG.FUNDING_CAP,
+        GAME_CONFIG.FUNDING_BASE + prep * GAME_CONFIG.FUNDING_PER_POINT,
+      );
+      const newRevenue = Math.min(
+        METRICS_CONFIG.revenue.max,
+        (this.state.metrics.revenue || 0) + funding,
+      );
+      this.state = {
+        ...this.state,
+        phase: 'launch',
+        fundingRaised: funding,
+        metrics: { ...this.state.metrics, revenue: newRevenue },
+      };
       this.io.to(this.room.code).emit('game:phaseChange', { phase: 'launch', tick: this.state.tick });
+      this.io.to(this.room.code).emit('game:funded', { funding, prep, tick: this.state.tick });
     }
 
     const roleBonusActions = ROLE_BONUSES[player.role] || [];
@@ -261,6 +295,13 @@ export class GameEngine {
       actionId, actionName: action.name, actionEmoji: action.emoji,
       hasRoleBonus, tick: this.state.tick,
     });
+    if (outcome) {
+      this.io.to(this.room.code).emit('game:actionOutcome', {
+        playerId: socketId, playerName: player.name,
+        actionName: action.name, actionEmoji: action.emoji,
+        result: outcome.result, hadBug: outcome.hadBug, tick: this.state.tick,
+      });
+    }
 
     this.broadcastState();
     return { success: true, duration, hasRoleBonus };
@@ -387,6 +428,7 @@ export class GameEngine {
         if (this.state.phase === 'idea' && a.phase !== 'idea') return false;
         if (this.state.phase !== 'idea' && a.phase === 'idea') return false;
         if (a.maxUses && (this.state.actionCounts?.[id] || 0) >= a.maxUses) return false;
+        if (a.motivationFloor && (p.motivation || 0) < a.motivationFloor) return false;
         return true;
       };
       let candidates = bonusActions.filter(ready);
@@ -408,6 +450,20 @@ export class GameEngine {
       this.handlePlayerAction(id, choice);
       // Schedule next action 5–11 ticks out
       p.nextActionTick = this.state.tick + 5 + Math.floor(Math.random() * 7);
+    }
+  }
+
+  tickMotivation() {
+    // Motivation drifts toward target = (salary − default) mapped to 30..100.
+    // Below default → toward low morale. Above default → toward enthused.
+    for (const p of Object.values(this.room.players)) {
+      if (p.salary === undefined) p.salary = GAME_CONFIG.SALARY_DEFAULT;
+      if (p.motivation === undefined) p.motivation = 70;
+      const range = GAME_CONFIG.SALARY_MAX - GAME_CONFIG.SALARY_MIN;
+      const ratio = (p.salary - GAME_CONFIG.SALARY_MIN) / range;
+      const target = 30 + ratio * 70; // 30 at min, 100 at max
+      const delta = (target - p.motivation) * 0.04; // smooth approach
+      p.motivation = Math.max(0, Math.min(100, p.motivation + delta - GAME_CONFIG.MOTIVATION_DECAY * 0.1));
     }
   }
 
@@ -439,6 +495,8 @@ export class GameEngine {
         actionsUsed: p.actionsUsed || 0,
         busyRemaining, busyTotal: p.busyTotal || 0,
         busyAction: busyRemaining > 0 ? p.busyAction : null,
+        salary: p.salary || GAME_CONFIG.SALARY_DEFAULT,
+        motivation: Math.round(p.motivation || 70),
         position: p.position || { x: 200, y: 250 },
       };
     }
@@ -454,6 +512,10 @@ export class GameEngine {
       phase: this.state.phase,
       gameType: this.state.gameType, gameSubtype: this.state.gameSubtype,
       lastBurn: this.state.lastBurn || 0,
+      lastIncome: this.state.lastIncome || 0,
+      arpu: this.state.arpu || 0,
+      preparationPoints: this.state.preparationPoints || 0,
+      fundingRaised: this.state.fundingRaised || 0,
       actionCounts: this.state.actionCounts || {},
       milestone: (() => {
         const ms = PHASE_MILESTONES[this.state.phase];

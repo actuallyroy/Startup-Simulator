@@ -12,7 +12,8 @@ export const useGameStore = create((set, get) => ({
   metrics: null, activeEvents: [], eventHistory: [], actionHistory: [],
   tick: 0, stage: 0, timeRemaining: 300, players: {}, phase: 'idea',
   gameType: 'product', gameSubtype: 'saas',
-  milestone: null, winCondition: null, lastBurn: 0, endReason: null,
+  milestone: null, winCondition: null, lastBurn: 0, lastIncome: 0, arpu: 0, endReason: null,
+  preparationPoints: 0, fundingRaised: 0,
   actionCounts: {},
   // New systems
   upgrades: [], objectives: [], objectivesCompleted: 0, bonusScore: 0,
@@ -23,6 +24,7 @@ export const useGameStore = create((set, get) => ({
   // My state
   myRole: null, myActionsUsed: 0,
   myBusyRemaining: 0, myBusyTotal: 0, myBusyAction: null,
+  myMotivation: 70, mySalary: 50,
   myPosition: { x: 200, y: 250 }, myAvatar: null,
   // UI
   notification: null, activeActionTab: 'engineering',
@@ -59,11 +61,17 @@ export const useGameStore = create((set, get) => ({
       milestone: gs.milestone || null,
       winCondition: gs.winCondition || null,
       lastBurn: gs.lastBurn || 0,
+      lastIncome: gs.lastIncome || 0,
+      arpu: gs.arpu || 0,
+      preparationPoints: gs.preparationPoints || 0,
+      fundingRaised: gs.fundingRaised || 0,
       actionCounts: gs.actionCounts || {},
       myActionsUsed: myPlayer?.actionsUsed || 0,
       myBusyRemaining: myPlayer?.busyRemaining || 0,
       myBusyTotal: myPlayer?.busyTotal || 0,
       myBusyAction: myPlayer?.busyAction || null,
+      myMotivation: myPlayer?.motivation ?? 70,
+      mySalary: myPlayer?.salary ?? 50,
     });
   },
 

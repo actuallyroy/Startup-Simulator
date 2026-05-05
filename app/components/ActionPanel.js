@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useSocket } from '../hooks/useSocket';
 import { useGameStore } from '../hooks/useGameState';
-import { ACTIONS, ACTION_CATEGORIES, ROLE_BONUSES, GAME_CONFIG, METRICS_CONFIG } from '../lib/gameConfig';
+import { ACTIONS, ACTION_CATEGORIES, ROLE_BONUSES, GAME_CONFIG, METRICS_CONFIG, IDEA_CATEGORIES } from '../lib/gameConfig';
 
 // Format an effect delta for display: "👥 +80", "🐛 −15", "💰 −$10".
 function formatEffect(metric, delta) {
@@ -27,6 +27,7 @@ export default function ActionPanel() {
     roomCode, myRole, myActionsUsed, setNotification,
     activeActionTab, setActiveActionTab, players, socketId,
     myBusyRemaining, myBusyTotal, myBusyAction, phase, actionCounts,
+    myMotivation, mySalary, preparationPoints,
   } = useGameStore();
   const [delegateMode, setDelegateMode] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -34,12 +35,21 @@ export default function ActionPanel() {
   if (!myRole) return null;
 
   const roleBonusActions = ROLE_BONUSES[myRole] || [];
-  const categoryKeys = Object.keys(ACTION_CATEGORIES);
-  // Idea phase: only show idea-tagged actions; later phases hide them.
   const ideaPhase = phase === 'idea';
+  // During idea phase show three sub-tabs (product/research/pitch). Otherwise the normal 6 categories.
+  const categoryKeys = ideaPhase ? Object.keys(IDEA_CATEGORIES) : Object.keys(ACTION_CATEGORIES);
+  const categories = ideaPhase ? IDEA_CATEGORIES : ACTION_CATEGORIES;
+  // If the current tab isn't valid for this phase, default to the first one.
+  const effectiveTab = categoryKeys.includes(activeActionTab) ? activeActionTab : categoryKeys[0];
   const tabActions = ideaPhase
-    ? Object.values(ACTIONS).filter(a => a.phase === 'idea')
-    : Object.values(ACTIONS).filter(a => a.category === activeActionTab && a.phase !== 'idea');
+    ? Object.values(ACTIONS).filter(a => a.phase === 'idea' && a.category === effectiveTab)
+    : Object.values(ACTIONS).filter(a => a.category === effectiveTab && a.phase !== 'idea');
+
+  // Estimated funding from current prep points
+  const fundingEstimate = ideaPhase ? Math.min(
+    GAME_CONFIG.FUNDING_CAP,
+    GAME_CONFIG.FUNDING_BASE + (preparationPoints || 0) * GAME_CONFIG.FUNDING_PER_POINT,
+  ) : 0;
 
   const isBusy = myBusyRemaining > 0;
   const busyAction = myBusyAction ? ACTIONS[myBusyAction] : null;
@@ -80,25 +90,34 @@ export default function ActionPanel() {
       >
         {collapsed ? '▲' : '▼'}
       </button>
-      {/* Tab Bar — hidden during idea phase since only 3 actions exist */}
+      {/* Tab Bar */}
       <div className="action-tabs">
-        {ideaPhase ? (
-          <span className="phase-pill">💡 IDEA PHASE — Talk to users, validate, then ship MVP to launch</span>
-        ) : (
-          categoryKeys.map((key) => (
-            <button
-              key={key}
-              className={`action-tab ${activeActionTab === key ? 'active' : ''}`}
-              onClick={() => setActiveActionTab(key)}
-            >
-              {ACTION_CATEGORIES[key].name}
-            </button>
-          ))
-        )}
+        {categoryKeys.map((key) => (
+          <button
+            key={key}
+            className={`action-tab ${effectiveTab === key ? 'active' : ''}`}
+            onClick={() => setActiveActionTab(key)}
+          >
+            {categories[key].name}
+          </button>
+        ))}
         <span className="actions-counter">
+          <span className={`motivation-pill ${myMotivation < 40 ? 'low' : myMotivation > 80 ? 'high' : ''}`}
+            title={`Salary $${mySalary}/tick → motivation ${myMotivation}`}>
+            {myMotivation > 80 ? '🔥' : myMotivation < 40 ? '😞' : '😐'} {myMotivation}
+          </span>
           ⚙️ {myActionsUsed}/{GAME_CONFIG.MAX_ACTIONS_PER_ROUND}
         </span>
       </div>
+      {ideaPhase && (
+        <div className="prep-banner">
+          <span className="prep-pill">💡 Pre-Launch — work on Product / Research / Pitch, then pitch investors</span>
+          <span className="prep-funding">
+            <span className="prep-points">📊 {preparationPoints || 0} prep pts</span>
+            <span className="prep-funding-amount">→ ~${fundingEstimate.toLocaleString()} funding</span>
+          </span>
+        </div>
+      )}
 
       {/* Global busy banner */}
       {isBusy && busyAction && (
@@ -132,8 +151,12 @@ export default function ActionPanel() {
           const locked = action.roleLock && action.roleLock !== myRole;
           const used = actionCounts?.[action.id] || 0;
           const exhausted = action.maxUses && used >= action.maxUses;
-          const disabled = locked || isBusy || maxedOut || exhausted;
+          const motLocked = action.motivationFloor && myMotivation < action.motivationFloor;
+          const disabled = locked || isBusy || maxedOut || exhausted || motLocked;
           const hasBonus = roleBonusActions.includes(action.id);
+          // Adjusted duration based on motivation
+          const motMul = 1 + (1 - myMotivation / 100) * 0.6;
+          const adjDuration = Math.max(1, Math.ceil(action.cooldown * motMul));
 
           // Effect chips, sorted: positives first, negatives last
           const effectChips = Object.entries(action.effects || {})
@@ -156,7 +179,7 @@ export default function ActionPanel() {
                 <div className="action-header">
                   <span className="action-emoji">{action.emoji}</span>
                   <span className="action-duration">
-                    {action.maxUses ? `${used}/${action.maxUses}` : `⏱ ${action.cooldown}s`}
+                    {action.maxUses ? `${used}/${action.maxUses}` : `⏱ ${adjDuration}s`}
                   </span>
                 </div>
                 <span className="action-name">{action.name}</span>
@@ -170,6 +193,7 @@ export default function ActionPanel() {
                 </div>
                 {hasBonus && !locked && <span className="bonus-badge">1.5x</span>}
                 {locked && <span className="lock-badge">🔒 {action.roleLock.toUpperCase()}</span>}
+                {motLocked && !locked && <span className="lock-badge mot-lock">😐 {action.motivationFloor}+ MOT</span>}
               </button>
               {otherPlayers.length > 0 && !locked && !isBusy && (
                 <button
@@ -187,8 +211,8 @@ export default function ActionPanel() {
 
       <div className="action-effects-hint">
         <span className="effects-hint-text">
-          {ACTION_CATEGORIES[activeActionTab].description}
-          {hasBonus(activeActionTab, myRole) ? ' • ⭐ Your role gets a bonus here!' : ''}
+          {categories[effectiveTab]?.description || ''}
+          {!ideaPhase && hasBonus(effectiveTab, myRole) ? ' • ⭐ Your role gets a bonus here!' : ''}
         </span>
       </div>
     </div>

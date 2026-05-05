@@ -57,16 +57,14 @@ export default function GameScreen() {
                     <div className="event-alert-desc">{event.description}</div>
                   </div>
                   <div className="event-alert-actions">
-                    {response && (
+                    {response ? (
                       <button className="event-respond-btn"
                         onClick={() => handleRespondEvent(event.id)}>
                         {response.label}
                       </button>
+                    ) : (
+                      <span className="event-unavoidable">⚠ Unavoidable — ride it out</span>
                     )}
-                    <button className="event-ignore-btn"
-                      onClick={() => {}}>
-                      ❌ Ignore
-                    </button>
                   </div>
                 </div>
               );
