@@ -202,9 +202,17 @@ export default function ActionPanel() {
             if (synergyMul > 2.5) synergyMul = 2.5;
           }
 
-          // Effect chips, sorted: positives first, negatives last
+          // Effect chips, sorted: positives first, negatives last.
+          // Beneficial outcomes get scaled by role bonus and active synergy
+          // — so a Frontend dev sees Mobile Optimize as ≤+150 not ≤+100.
+          const roleMul = hasBonus ? 1.5 : 1.0;
           const effectChips = Object.entries(action.effects || {})
-            .map(([m, d]) => ({ metric: m, ...formatEffect(m, d) }))
+            .map(([m, d]) => {
+              const inverted = m === 'errors' || m === 'latency';
+              const beneficial = inverted ? d < 0 : d > 0;
+              const scaled = beneficial ? Math.round(d * roleMul * synergyMul) : d;
+              return { metric: m, ...formatEffect(m, scaled) };
+            })
             .filter(Boolean)
             .sort((a, b) => (a.isGood === b.isGood ? 0 : a.isGood ? -1 : 1));
 
