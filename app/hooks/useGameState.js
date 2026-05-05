@@ -12,6 +12,8 @@ export const useGameStore = create((set, get) => ({
   metrics: null, activeEvents: [], eventHistory: [], actionHistory: [],
   tick: 0, stage: 0, timeRemaining: 300, players: {}, phase: 'idea',
   gameType: 'product', gameSubtype: 'saas',
+  milestone: null, winCondition: null, lastBurn: 0, endReason: null,
+  actionCounts: {},
   // New systems
   upgrades: [], objectives: [], objectivesCompleted: 0, bonusScore: 0,
   pendingDelegation: null, // incoming delegation request
@@ -54,6 +56,10 @@ export const useGameStore = create((set, get) => ({
       phase: gs.phase || 'idea',
       gameType: gs.gameType || 'product',
       gameSubtype: gs.gameSubtype || 'saas',
+      milestone: gs.milestone || null,
+      winCondition: gs.winCondition || null,
+      lastBurn: gs.lastBurn || 0,
+      actionCounts: gs.actionCounts || {},
       myActionsUsed: myPlayer?.actionsUsed || 0,
       myBusyRemaining: myPlayer?.busyRemaining || 0,
       myBusyTotal: myPlayer?.busyTotal || 0,
@@ -90,7 +96,7 @@ export const useGameStore = create((set, get) => ({
 
   setPendingDelegation: (delegation) => set({ pendingDelegation: delegation }),
 
-  setScores: (scores) => set({ scores, gamePhase: 'scoring' }),
+  setScores: (scores, endReason = null) => set({ scores, endReason, gamePhase: 'scoring' }),
 
   setMyPosition: (pos) => set({ myPosition: pos }),
 
@@ -107,7 +113,8 @@ export const useGameStore = create((set, get) => ({
     tick: 0, stage: 0, timeRemaining: 300, players: {}, upgrades: [],
     objectives: [], objectivesCompleted: 0, bonusScore: 0,
     pendingDelegation: null, actionToasts: [], chatBubbles: {},
-    scores: null, myRole: null, myActionsUsed: 0,
+    scores: null, endReason: null, milestone: null, winCondition: null, lastBurn: 0,
+    myRole: null, myActionsUsed: 0,
     myBusyRemaining: 0, myBusyTotal: 0, myBusyAction: null,
     myPosition: { x: 200, y: 250 }, notification: null, activeActionTab: 'engineering',
   }),

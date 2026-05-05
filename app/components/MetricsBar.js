@@ -8,6 +8,9 @@ export default function MetricsBar() {
   const metrics = useGameStore((s) => s.metrics);
   const timeRemaining = useGameStore((s) => s.timeRemaining);
   const stage = useGameStore((s) => s.stage);
+  const milestone = useGameStore((s) => s.milestone);
+  const winCondition = useGameStore((s) => s.winCondition);
+  const lastBurn = useGameStore((s) => s.lastBurn);
 
   const prevMetrics = useRef(metrics);
   const changingMetrics = useRef({});
@@ -72,6 +75,17 @@ export default function MetricsBar() {
 
   const stageName = WORLD_STAGES[stage]?.name || 'Starting';
 
+  // Win-target progress
+  let winPct = 0;
+  let winLabel = null;
+  if (winCondition && metrics) {
+    const cur = metrics[winCondition.metric] || 0;
+    winPct = Math.min(100, (cur / winCondition.value) * 100);
+    const prefix = winCondition.metric === 'revenue' ? '$' : '';
+    const cleanCur = winCondition.metric === 'revenue' ? Math.round(cur) : Math.round(cur);
+    winLabel = `🎯 ${winCondition.label} (${prefix}${cleanCur.toLocaleString()} / ${prefix}${winCondition.value.toLocaleString()})`;
+  }
+
   return (
     <div className="metrics-bar">
       <div className="metrics-group">
@@ -81,7 +95,12 @@ export default function MetricsBar() {
           const isChanging = changingMetrics.current[key];
           return (
             <div key={key} className={`metric-item ${status ? `metric-${status}` : ''}`}>
-              <span className="metric-label">{config.emoji} {config.name}</span>
+              <span className="metric-label">
+                {config.emoji} {config.name}
+                {key === 'revenue' && lastBurn > 0 && (
+                  <span className="burn-badge" title="Burn this tick">−${lastBurn}/t</span>
+                )}
+              </span>
               <span className={`metric-value ${isChanging ? 'changing' : ''}`} style={{ color: config.color }}>
                 {formatValue(key, value)}
               </span>
@@ -95,7 +114,16 @@ export default function MetricsBar() {
           );
         })}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+      <div className="hud-right">
+        {milestone && !milestone.completed && (
+          <span className="milestone-pill">🏁 {milestone.description}</span>
+        )}
+        {winLabel && (
+          <div className="win-target">
+            <div className="win-target-text">{winLabel}</div>
+            <div className="win-target-bar"><div className="win-target-fill" style={{ width: `${winPct}%` }} /></div>
+          </div>
+        )}
         <span className="stage-badge">🏢 {stageName}</span>
         <div className={`timer-display ${timeRemaining < 60 ? 'urgent' : ''}`}>
           ⏱ {formatTime(timeRemaining)}

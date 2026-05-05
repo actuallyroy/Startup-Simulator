@@ -26,9 +26,10 @@ export default function ActionPanel() {
   const {
     roomCode, myRole, myActionsUsed, setNotification,
     activeActionTab, setActiveActionTab, players, socketId,
-    myBusyRemaining, myBusyTotal, myBusyAction, phase,
+    myBusyRemaining, myBusyTotal, myBusyAction, phase, actionCounts,
   } = useGameStore();
   const [delegateMode, setDelegateMode] = useState(null);
+  const [collapsed, setCollapsed] = useState(false);
 
   if (!myRole) return null;
 
@@ -71,7 +72,14 @@ export default function ActionPanel() {
   const maxedOut = myActionsUsed >= GAME_CONFIG.MAX_ACTIONS_PER_ROUND;
 
   return (
-    <div className="action-panel">
+    <div className={`action-panel ${collapsed ? 'collapsed' : ''}`}>
+      <button
+        className="action-collapse-btn"
+        onClick={() => setCollapsed(!collapsed)}
+        title={collapsed ? 'Show actions' : 'Hide actions'}
+      >
+        {collapsed ? '▲' : '▼'}
+      </button>
       {/* Tab Bar — hidden during idea phase since only 3 actions exist */}
       <div className="action-tabs">
         {ideaPhase ? (
@@ -122,7 +130,9 @@ export default function ActionPanel() {
       <div className="action-buttons">
         {tabActions.map((action) => {
           const locked = action.roleLock && action.roleLock !== myRole;
-          const disabled = locked || isBusy || maxedOut;
+          const used = actionCounts?.[action.id] || 0;
+          const exhausted = action.maxUses && used >= action.maxUses;
+          const disabled = locked || isBusy || maxedOut || exhausted;
           const hasBonus = roleBonusActions.includes(action.id);
 
           // Effect chips, sorted: positives first, negatives last
@@ -145,7 +155,9 @@ export default function ActionPanel() {
               >
                 <div className="action-header">
                   <span className="action-emoji">{action.emoji}</span>
-                  <span className="action-duration">⏱ {action.cooldown}s</span>
+                  <span className="action-duration">
+                    {action.maxUses ? `${used}/${action.maxUses}` : `⏱ ${action.cooldown}s`}
+                  </span>
                 </div>
                 <span className="action-name">{action.name}</span>
                 <div className="action-effects">

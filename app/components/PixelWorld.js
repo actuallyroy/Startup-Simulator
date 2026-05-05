@@ -97,7 +97,7 @@ export default function PixelWorld() {
   return (
     <div className="pixel-world phaser-host">
       <div ref={containerRef} className="phaser-canvas" />
-      <div className="pw-move-hint">WASD / Arrows to move</div>
+      <div className="pw-move-hint">WASD/arrows to move · drag to pan · double-click to recenter</div>
     </div>
   );
 }

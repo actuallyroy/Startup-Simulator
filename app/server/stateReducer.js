@@ -1,6 +1,6 @@
 // State reducer — pure functions for game state mutations
 
-import { ACTIONS, METRICS_CONFIG, EVENTS, UPGRADES, ROLE_BONUSES, GAME_TYPES } from '../lib/gameConfig.js';
+import { ACTIONS, METRICS_CONFIG, EVENTS, UPGRADES, ROLE_BONUSES, GAME_TYPES, GAME_CONFIG } from '../lib/gameConfig.js';
 
 export function createInitialState(gameType = null, gameSubtype = null) {
   const metrics = {};
@@ -20,6 +20,7 @@ export function createInitialState(gameType = null, gameSubtype = null) {
     phase: 'idea',
     gameType, gameSubtype,
     revenueMultiplier: sub?.revenueMultiplier || 1.0,
+    actionCounts: {},   // team-wide use count per action id
   };
 }
 
@@ -95,7 +96,7 @@ export function applyUpgrade(state, upgradeId) {
   return { ...state, metrics: newMetrics, upgrades: [...state.upgrades, upgradeId] };
 }
 
-export function tickState(state) {
+export function tickState(state, playerCount = 1) {
   const newMetrics = { ...state.metrics };
   const upgrades = state.upgrades;
 
@@ -131,6 +132,14 @@ export function tickState(state) {
     newMetrics.revenue = Math.max(METRICS_CONFIG.revenue.min, Math.min(METRICS_CONFIG.revenue.max, newMetrics.revenue + revenueGain));
   }
 
+  // Burn rate — server costs + salaries every tick once the company exists.
+  // Idea phase has no burn; the team is just sketching.
+  let burn = 0;
+  if (state.phase !== 'idea') {
+    burn = GAME_CONFIG.BURN_BASE + GAME_CONFIG.BURN_PER_PLAYER * Math.max(1, playerCount);
+    newMetrics.revenue = Math.max(METRICS_CONFIG.revenue.min, newMetrics.revenue - burn);
+  }
+
   // Cross-metric effects
   if (newMetrics.errors > 50) newMetrics.latency = Math.min(METRICS_CONFIG.latency.max, newMetrics.latency + 5);
   if (newMetrics.latency > 200) newMetrics.happiness = Math.max(METRICS_CONFIG.happiness.min, newMetrics.happiness - 1);
@@ -146,7 +155,7 @@ export function tickState(state) {
   else if (newMetrics.users >= 500) stage = 1;
   if (upgrades.includes('seriesAOffice') && stage < 2) stage = 2;
 
-  return { ...state, metrics: newMetrics, activeEvents, tick: state.tick + 1, stage };
+  return { ...state, metrics: newMetrics, activeEvents, tick: state.tick + 1, stage, lastBurn: burn };
 }
 
 export function calculateScores(state, players) {

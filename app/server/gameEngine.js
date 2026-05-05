@@ -1,6 +1,6 @@
 // Game engine — tick-based loop with upgrades, objectives, delegation, event responses
 
-import { GAME_CONFIG, ACTIONS, EVENTS, ROOM_STATES, UPGRADES, METRICS_CONFIG, OBJECTIVES_POOL, ROLE_BONUSES } from '../lib/gameConfig.js';
+import { GAME_CONFIG, ACTIONS, EVENTS, ROOM_STATES, UPGRADES, METRICS_CONFIG, OBJECTIVES_POOL, ROLE_BONUSES, WIN_CONDITIONS, PHASE_MILESTONES } from '../lib/gameConfig.js';
 import { createInitialState, applyAction, applyEventResponseClean, applyUpgrade, tickState, calculateScores } from './stateReducer.js';
 import { createEventGenerator } from './eventGenerator.js';
 
@@ -57,9 +57,27 @@ export class GameEngine {
   tick() {
     if (!this.isRunning) return;
     this.updateCooldowns();
-    this.state = tickState(this.state);
+    const playerCount = Object.keys(this.room.players).length;
+    this.state = tickState(this.state, playerCount);
     this.checkObjectives();
+    this.checkPhaseMilestone();
     this.runBots();
+
+    // Bankruptcy — revenue went to zero past idea phase
+    if (this.state.phase !== 'idea' && this.state.metrics.revenue <= 0) {
+      this.endGame('bankruptcy');
+      return;
+    }
+    // Victory — hit the win condition for this game type
+    const win = WIN_CONDITIONS[this.state.gameSubtype];
+    if (win && !this.state.won && this.state.phase !== 'idea') {
+      const v = this.state.metrics[win.metric] || 0;
+      if (v >= win.value) {
+        this.state = { ...this.state, won: true };
+        this.endGame('victory');
+        return;
+      }
+    }
 
     // Auto-promote to growth phase once user threshold is hit
     if (this.state.phase === 'launch' && this.state.metrics.users >= GAME_CONFIG.LAUNCH_USER_THRESHOLD) {
@@ -97,6 +115,28 @@ export class GameEngine {
     if (this.state.metrics.errors >= 100) { this.endGame('critical_failure'); return; }
 
     this.broadcastState();
+  }
+
+  checkPhaseMilestone() {
+    const ms = PHASE_MILESTONES[this.state.phase];
+    if (!ms) return;
+    if ((this.state.completedMilestones || []).includes(ms.id)) return;
+    if (ms.check(this.state.metrics, this.state)) {
+      const completed = [...(this.state.completedMilestones || []), ms.id];
+      const reward = ms.reward || {};
+      const newRevenue = Math.min(
+        METRICS_CONFIG.revenue.max,
+        (this.state.metrics.revenue || 0) + (reward.revenue || 0),
+      );
+      this.state = {
+        ...this.state,
+        completedMilestones: completed,
+        metrics: { ...this.state.metrics, revenue: newRevenue },
+      };
+      this.io.to(this.room.code).emit('game:milestoneComplete', {
+        id: ms.id, description: ms.description, reward, tick: this.state.tick,
+      });
+    }
   }
 
   checkObjectives() {
@@ -173,6 +213,13 @@ export class GameEngine {
     if (this.state.phase !== 'idea' && action.phase === 'idea') {
       return { error: 'Already past the idea phase' };
     }
+    // Per-round use cap (team-wide). Stops grinding low-cooldown actions.
+    if (action.maxUses) {
+      const used = this.state.actionCounts?.[actionId] || 0;
+      if (used >= action.maxUses) {
+        return { error: `Already used ${action.maxUses} times this round` };
+      }
+    }
     // Global busy lock: while doing one action, all others are gated.
     const busyRemaining = (player.busyUntil || 0) - this.state.tick;
     if (busyRemaining > 0) {
@@ -192,6 +239,13 @@ export class GameEngine {
     player.busyAction = actionId;
     player.busyTotal = duration;
     player.actionsUsed = (player.actionsUsed || 0) + 1;
+
+    // Increment team-wide use count for this action
+    if (action.maxUses) {
+      const counts = { ...(this.state.actionCounts || {}) };
+      counts[actionId] = (counts[actionId] || 0) + 1;
+      this.state = { ...this.state, actionCounts: counts };
+    }
 
     // Ship MVP → flips game out of the idea phase
     if (action.launchesGame && this.state.phase === 'idea') {
@@ -332,6 +386,7 @@ export class GameEngine {
         if (a.roleLock && a.roleLock !== p.role) return false;
         if (this.state.phase === 'idea' && a.phase !== 'idea') return false;
         if (this.state.phase !== 'idea' && a.phase === 'idea') return false;
+        if (a.maxUses && (this.state.actionCounts?.[id] || 0) >= a.maxUses) return false;
         return true;
       };
       let candidates = bonusActions.filter(ready);
@@ -366,6 +421,12 @@ export class GameEngine {
     this.stop();
     this.room.state = ROOM_STATES.SCORING;
     const scores = calculateScores(this.state, this.room.players);
+    if (reason === 'victory') {
+      scores.grade = 'S+';
+      scores.totalScore = Math.max(scores.totalScore, 100);
+    } else if (reason === 'bankruptcy' || reason === 'critical_failure') {
+      scores.grade = 'F';
+    }
     this.io.to(this.room.code).emit('game:end', { reason, scores, finalState: this.state });
   }
 
@@ -392,6 +453,17 @@ export class GameEngine {
       timeRemaining: GAME_CONFIG.ROUND_DURATION - this.state.tick,
       phase: this.state.phase,
       gameType: this.state.gameType, gameSubtype: this.state.gameSubtype,
+      lastBurn: this.state.lastBurn || 0,
+      actionCounts: this.state.actionCounts || {},
+      milestone: (() => {
+        const ms = PHASE_MILESTONES[this.state.phase];
+        if (!ms) return null;
+        return {
+          id: ms.id, description: ms.description,
+          completed: (this.state.completedMilestones || []).includes(ms.id),
+        };
+      })(),
+      winCondition: WIN_CONDITIONS[this.state.gameSubtype] || null,
       players, upgrades: this.state.upgrades,
       objectives: this.state.objectives.map(o => ({
         id: o.id, description: o.description, type: o.type, completed: o.completed,

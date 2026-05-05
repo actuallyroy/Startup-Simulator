@@ -8,6 +8,30 @@ export const GAME_CONFIG = {
   ROOM_CODE_LENGTH: 4,
   EVENT_GRACE_TICKS: 30,  // No events during first ~minute of real time
   LAUNCH_USER_THRESHOLD: 50,    // Hitting this flips phase to "growth"
+  // Stakes: burn rate eats revenue every tick once you've launched
+  BURN_BASE: 15,          // Server / utilities baseline
+  BURN_PER_PLAYER: 10,    // Salary per teammate (incl. bots)
+};
+
+// What "winning" looks like — set per startup sub-type. Reach this and you
+// trigger an early Victory end screen. Otherwise the round just expires.
+export const WIN_CONDITIONS = {
+  saas:        { metric: 'revenue',   value: 10000, label: 'Reach $10,000 revenue' },
+  mobileApp:   { metric: 'users',     value: 4000,  label: 'Reach 4,000 users' },
+  ecommerce:   { metric: 'revenue',   value: 12000, label: 'Reach $12,000 revenue' },
+  gameStudio:  { metric: 'users',     value: 3000,  label: 'Reach 3,000 happy players' },
+  agency:      { metric: 'revenue',   value: 15000, label: 'Reach $15,000 revenue' },
+  consulting:  { metric: 'revenue',   value: 18000, label: 'Reach $18,000 revenue' },
+  marketplace: { metric: 'users',     value: 4500,  label: 'Reach 4,500 users' },
+  freelance:   { metric: 'revenue',   value: 7000,  label: 'Reach $7,000 revenue' },
+};
+
+// Fixed staircase of milestones — one per phase. The currently-active one is
+// pinned in the HUD so players always know what's next.
+export const PHASE_MILESTONES = {
+  idea:   { id: 'shipMvp',     description: 'Ship the MVP to launch your company', check: (m, s) => s.phase !== 'idea', reward: { revenue: 200 } },
+  launch: { id: 'reach100',    description: 'Reach 100 users to enter Growth phase', check: (m) => m.users >= 100,  reward: { revenue: 300 } },
+  growth: { id: 'reach5kRev',  description: 'Reach $5,000 revenue', check: (m) => m.revenue >= 5000, reward: { revenue: 500 } },
 };
 
 export const PHASES = {
@@ -106,22 +130,25 @@ export const ACTIONS = {
   // ── IDEA PHASE (only these are available before MVP launches) ──
   validateIdea: {
     id: 'validateIdea', name: 'Validate Idea', emoji: '💡', cooldown: 4, category: 'engineering',
-    description: 'Sketch the idea on a whiteboard',
+    description: 'Sketch the idea on a whiteboard — clarifies direction',
     effects: { happiness: 5 },
     phase: 'idea',
+    maxUses: 2,
   },
   talkToUsers: {
     id: 'talkToUsers', name: 'Talk to Users', emoji: '🗣️', cooldown: 5, category: 'product',
-    description: 'Interview potential users to refine the idea',
-    effects: { happiness: 8, users: 5 },
+    description: 'Interview potential users — refines the idea, no signups yet',
+    effects: { happiness: 8 },
     phase: 'idea',
+    maxUses: 3,
   },
   buildMvp: {
     id: 'buildMvp', name: 'Build MVP', emoji: '🛠️', cooldown: 8, category: 'engineering',
     description: 'Ship the first working version — launches the company!',
-    effects: { users: 25, happiness: 10 },
+    effects: { users: 30, happiness: 10 },
     phase: 'idea',
     launchesGame: true,
+    maxUses: 1,
   },
 
   // ── ENGINEERING ──

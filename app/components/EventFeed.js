@@ -10,6 +10,7 @@ export default function EventFeed() {
   const { roomCode, actionHistory, activeEvents, objectives, upgrades, metrics,
     players, socketId, objectivesCompleted } = useGameStore();
   const [sidebarTab, setSidebarTab] = useState('feed'); // feed | objectives | upgrades | team
+  const [collapsed, setCollapsed] = useState(false);
 
   const handleUpgrade = (upgradeId) => {
     if (!socket) return;
@@ -27,7 +28,14 @@ export default function EventFeed() {
   const completedObjectives = (objectives || []).filter(o => o.completed);
 
   return (
-    <div className="event-feed">
+    <div className={`event-feed ${collapsed ? 'collapsed' : ''}`}>
+      <button
+        className="sidebar-collapse-btn"
+        onClick={() => setCollapsed(!collapsed)}
+        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      >
+        {collapsed ? '◀' : '▶'}
+      </button>
       {/* Sidebar tabs */}
       <div className="sidebar-tabs">
         <button className={`sidebar-tab ${sidebarTab === 'feed' ? 'active' : ''}`}

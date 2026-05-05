@@ -52,14 +52,30 @@ export function createRoom(hostSocketId, hostName) {
 export function joinRoom(roomCode, socketId, playerName) {
   const room = rooms.get(roomCode);
   if (!room) return { error: 'Room not found' };
-  if (room.state !== ROOM_STATES.LOBBY) return { error: 'Game already in progress' };
-  if (Object.keys(room.players).length >= GAME_CONFIG.MAX_PLAYERS) return { error: 'Room is full' };
+
+  // If the room is full, evict the first bot to make space. Real players
+  // are never kicked — they still block a join.
+  if (Object.keys(room.players).length >= GAME_CONFIG.MAX_PLAYERS) {
+    const botEntry = Object.entries(room.players).find(([, p]) => p.isBot);
+    if (!botEntry) return { error: 'Room is full' };
+    delete room.players[botEntry[0]];
+  }
+
+  const midGame = room.state !== ROOM_STATES.LOBBY;
+
+  // Mid-game joiners auto-pick a free role and start ready so they can act.
+  let assignedRole = null;
+  if (midGame) {
+    const allRoles = Object.values(ROLES).map(r => r.id);
+    const taken = new Set(Object.values(room.players).map(p => p.role).filter(Boolean));
+    assignedRole = allRoles.find(r => !taken.has(r)) || null;
+  }
 
   room.players[socketId] = {
     id: socketId,
     name: playerName,
-    role: null,
-    ready: false,
+    role: assignedRole,
+    ready: midGame,
     actionsUsed: 0,
     busyUntil: 0,
     busyAction: null,
@@ -67,7 +83,18 @@ export function joinRoom(roomCode, socketId, playerName) {
     avatar: randomAvatar(),
   };
 
-  return { room };
+  // Give them a desk position immediately if joining mid-game so they don't
+  // briefly render at (0,0) before the next broadcast.
+  if (midGame) {
+    const desks = [
+      { x: 80, y: 220 }, { x: 200, y: 220 }, { x: 320, y: 220 },
+      { x: 80, y: 280 }, { x: 200, y: 280 },
+    ];
+    const idx = Object.keys(room.players).indexOf(socketId);
+    room.players[socketId].position = { ...(desks[idx] || desks[0]) };
+  }
+
+  return { room, midGame };
 }
 
 export function setAvatar(roomCode, socketId, avatar) {

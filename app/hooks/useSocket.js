@@ -42,7 +42,7 @@ export function useSocket() {
     // Game lifecycle
     socket.on('game:start', () => setGamePhase('playing'));
     socket.on('game:state', (gs) => updateGameState(gs));
-    socket.on('game:end', ({ reason, scores }) => setScores(scores));
+    socket.on('game:end', ({ reason, scores }) => setScores(scores, reason));
 
     // Events
     socket.on('game:event', ({ eventId, event }) => {
@@ -78,6 +78,14 @@ export function useSocket() {
     socket.on('game:upgradePurchased', ({ upgradeName, upgradeEmoji, playerName }) => {
       addActionToast({
         message: `${upgradeEmoji} ${playerName} bought ${upgradeName}!`,
+        type: 'success',
+      });
+    });
+
+    // Phase milestones
+    socket.on('game:milestoneComplete', ({ description, reward }) => {
+      addActionToast({
+        message: `🏁 Milestone: ${description}! +$${reward?.revenue || 0}`,
         type: 'success',
       });
     });

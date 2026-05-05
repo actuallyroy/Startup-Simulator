@@ -4,14 +4,18 @@
 import Phaser from 'phaser';
 import { drawAvatar, randomAvatar } from './avatarConfig.js';
 
-const WORLD_W = 640;
-const WORLD_H = 320;
+// Camera viewport — what the canvas displays at any moment.
+const VIEW_W = 640;
+const VIEW_H = 320;
+// Actual world size — bigger than the viewport so players can pan around.
+const WORLD_W = 1280;
+const WORLD_H = 480;
 const FLOOR_TOP = 130;
-const FLOOR_BOTTOM = 304;
+const FLOOR_BOTTOM = WORLD_H - 16;
 
 const DESK_POSITIONS = [
-  { x: 90, y: 220 }, { x: 220, y: 220 }, { x: 350, y: 220 },
-  { x: 90, y: 280 }, { x: 220, y: 280 },
+  { x: 120, y: 220 }, { x: 320, y: 220 }, { x: 520, y: 220 },
+  { x: 220, y: 320 }, { x: 420, y: 320 },
 ];
 
 class WorldScene extends Phaser.Scene {
@@ -31,6 +35,8 @@ class WorldScene extends Phaser.Scene {
 
   create() {
     this.cameras.main.setBackgroundColor('#23272f');
+    // Camera can scroll across the full world; the canvas viewport stays small.
+    this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
 
     this.drawWall();
     this.drawCeiling();
@@ -38,6 +44,7 @@ class WorldScene extends Phaser.Scene {
     this.drawFloor();
     this.drawDesks();
     this.drawServerRack();
+    this.setupPan();
 
     this.playerLayer = this.add.container(0, 0);
     this.fxLayer = this.add.container(0, 0);
@@ -67,20 +74,27 @@ class WorldScene extends Phaser.Scene {
     g.fillStyle(0x4a5568).fillRect(0, 60, WORLD_W, FLOOR_TOP - 60 + 8);
     // Wall stripes / wainscot
     g.fillStyle(0x3a4252).fillRect(0, FLOOR_TOP - 6, WORLD_W, 6);
-    // Picture frames on the wall as dressing
+    // Picture frames + whiteboard scattered along the wall
     const frame = (x, y, w, h, color) => {
       g.fillStyle(0x111).fillRect(x, y, w, h);
       g.fillStyle(color).fillRect(x + 2, y + 2, w - 4, h - 4);
     };
     frame(40, 78, 28, 22, 0x4fc3f7);
     frame(120, 76, 36, 26, 0xff8a65);
+    frame(260, 80, 32, 24, 0x81c784);
+    frame(420, 76, 28, 22, 0xc084fc);
     frame(WORLD_W - 80, 80, 30, 24, 0x81c784);
-    // "WHITEBOARD" near the right
-    g.fillStyle(0xeceff1).fillRect(WORLD_W - 180, 78, 60, 32);
-    g.lineStyle(2, 0x37474f).strokeRect(WORLD_W - 180, 78, 60, 32);
-    g.fillStyle(0xef5350).fillRect(WORLD_W - 174, 84, 18, 2);
-    g.fillStyle(0x4fc3f7).fillRect(WORLD_W - 174, 90, 24, 2);
-    g.fillStyle(0x81c784).fillRect(WORLD_W - 174, 96, 14, 2);
+    frame(WORLD_W - 240, 76, 36, 26, 0xfacc15);
+    // Whiteboard
+    g.fillStyle(0xeceff1).fillRect(WORLD_W - 380, 78, 60, 32);
+    g.lineStyle(2, 0x37474f).strokeRect(WORLD_W - 380, 78, 60, 32);
+    g.fillStyle(0xef5350).fillRect(WORLD_W - 374, 84, 18, 2);
+    g.fillStyle(0x4fc3f7).fillRect(WORLD_W - 374, 90, 24, 2);
+    g.fillStyle(0x81c784).fillRect(WORLD_W - 374, 96, 14, 2);
+    // Coffee station on the right side
+    g.fillStyle(0x6d4c41).fillRect(WORLD_W - 140, FLOOR_TOP, 80, 14);
+    g.fillStyle(0x3e2723).fillRect(WORLD_W - 130, FLOOR_TOP - 10, 10, 12);
+    g.fillStyle(0x3e2723).fillRect(WORLD_W - 110, FLOOR_TOP - 8, 8, 10);
   }
 
   drawCeiling() {
@@ -96,15 +110,18 @@ class WorldScene extends Phaser.Scene {
 
   drawWindow() {
     const g = this.add.graphics();
-    g.fillStyle(0x2c3e50).fillRect(WORLD_W / 2 - 76, 16, 152, 56);
-    g.fillStyle(0x87ceeb).fillRect(WORLD_W / 2 - 70, 22, 140, 44);
-    // Sun
-    g.fillStyle(0xfff176).fillCircle(WORLD_W / 2 + 40, 36, 6);
-    // Distant buildings
-    g.fillStyle(0x546e7a).fillRect(WORLD_W / 2 - 60, 50, 22, 16);
-    g.fillStyle(0x455a64).fillRect(WORLD_W / 2 - 30, 42, 18, 24);
-    g.fillStyle(0x546e7a).fillRect(WORLD_W / 2, 48, 14, 18);
-    g.fillStyle(0x455a64).fillRect(WORLD_W / 2 + 18, 40, 18, 26);
+    // Two windows now that the world is wider
+    const drawOne = (cx) => {
+      g.fillStyle(0x2c3e50).fillRect(cx - 76, 16, 152, 56);
+      g.fillStyle(0x87ceeb).fillRect(cx - 70, 22, 140, 44);
+      g.fillStyle(0xfff176).fillCircle(cx + 40, 36, 6);
+      g.fillStyle(0x546e7a).fillRect(cx - 60, 50, 22, 16);
+      g.fillStyle(0x455a64).fillRect(cx - 30, 42, 18, 24);
+      g.fillStyle(0x546e7a).fillRect(cx, 48, 14, 18);
+      g.fillStyle(0x455a64).fillRect(cx + 18, 40, 18, 26);
+    };
+    drawOne(Math.floor(WORLD_W * 0.3));
+    drawOne(Math.floor(WORLD_W * 0.7));
   }
 
   drawFloor() {
@@ -136,8 +153,39 @@ class WorldScene extends Phaser.Scene {
     }
   }
 
+  setupPan() {
+    this.userPanned = false;
+    this.dragStart = null;
+    this.input.on('pointerdown', (p) => {
+      this.dragStart = { x: p.x, y: p.y, scrollX: this.cameras.main.scrollX, scrollY: this.cameras.main.scrollY };
+    });
+    this.input.on('pointermove', (p) => {
+      if (!p.isDown || !this.dragStart) return;
+      const dx = p.x - this.dragStart.x;
+      const dy = p.y - this.dragStart.y;
+      if (Math.abs(dx) + Math.abs(dy) > 4) {
+        this.userPanned = true;
+        this.cameras.main.scrollX = this.dragStart.scrollX - dx;
+        this.cameras.main.scrollY = this.dragStart.scrollY - dy;
+      }
+    });
+    this.input.on('pointerup', () => { this.dragStart = null; });
+    // Double-click to recenter on me
+    this.input.on('pointerdown', (p) => {
+      if (p.event && p.event.detail === 2) this.userPanned = false;
+    });
+  }
+
+  centerCameraOnPlayer() {
+    const me = [...this.players.values()].find(p => p.isMe);
+    if (!me) return;
+    const cam = this.cameras.main;
+    cam.scrollX = me.container.x - VIEW_W / 2;
+    cam.scrollY = me.container.y - VIEW_H / 2;
+  }
+
   drawServerRack() {
-    const x = 580, y = 240;
+    const x = WORLD_W - 60, y = 240;
     this.add.rectangle(x, y, 36, 80, 0x37474f).setStrokeStyle(3, 0x263238);
     // Slots
     for (let i = 0; i < 4; i++) {
@@ -337,6 +385,8 @@ class WorldScene extends Phaser.Scene {
       if (this.cursors.up.isDown || this.wasd.W.isDown) dy -= speed;
       if (this.cursors.down.isDown || this.wasd.S.isDown) dy += speed;
       if (dx !== 0 || dy !== 0) {
+        // Movement re-snaps the camera to follow the player.
+        this.userPanned = false;
         me.container.x = Phaser.Math.Clamp(me.container.x + dx, 16, WORLD_W - 16);
         me.container.y = Phaser.Math.Clamp(me.container.y + dy, FLOOR_TOP, FLOOR_BOTTOM);
         me.target.x = me.container.x;
@@ -367,6 +417,15 @@ class WorldScene extends Phaser.Scene {
         bub.text.y = e.container.y - 28;
       }
     }
+
+    // Camera: follow the player smoothly unless they're panning manually
+    if (!this.userPanned && me) {
+      const cam = this.cameras.main;
+      const targetX = me.container.x - VIEW_W / 2;
+      const targetY = me.container.y - VIEW_H / 2;
+      cam.scrollX += (targetX - cam.scrollX) * 0.08;
+      cam.scrollY += (targetY - cam.scrollY) * 0.08;
+    }
   }
 }
 
@@ -374,15 +433,15 @@ export function startPhaserGame(parent, callbacks) {
   const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent,
-    width: WORLD_W,
-    height: WORLD_H,
+    width: VIEW_W,
+    height: VIEW_H,
     backgroundColor: '#23272f',
     pixelArt: true,
     scale: {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
-      width: WORLD_W,
-      height: WORLD_H,
+      width: VIEW_W,
+      height: VIEW_H,
     },
     scene: [WorldScene],
     audio: { noAudio: true },

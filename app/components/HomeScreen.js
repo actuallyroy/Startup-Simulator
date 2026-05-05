@@ -13,7 +13,8 @@ export default function HomeScreen() {
   const [error, setError] = useState('');
 
   const handleCreate = () => {
-    if (!name.trim() || !socket) return;
+    if (!socket) return;
+    if (!name.trim()) { setError('Enter your name first'); return; }
     setLoading(true);
     setError('');
     socket.emit('room:create', { playerName: name.trim() }, (res) => {
@@ -30,7 +31,9 @@ export default function HomeScreen() {
   };
 
   const handleJoin = () => {
-    if (!name.trim() || !joinCode.trim() || !socket) return;
+    if (!socket) return;
+    if (!name.trim()) { setError('Enter your name first'); return; }
+    if (!joinCode.trim()) { setError('Enter a room code'); return; }
     setLoading(true);
     setError('');
     socket.emit('room:join', { roomCode: joinCode.trim().toUpperCase(), playerName: name.trim() }, (res) => {
@@ -39,7 +42,7 @@ export default function HomeScreen() {
         setPlayerName(name.trim());
         setRoomCode(res.roomCode);
         setRoom(res.room);
-        setGamePhase('lobby');
+        setGamePhase(res.midGame ? 'playing' : 'lobby');
       } else {
         setError(res.error || 'Failed to join room');
       }
@@ -69,7 +72,7 @@ export default function HomeScreen() {
 
         {error && <div className="notification-toast error" style={{ position: 'relative', top: 0, left: 0, transform: 'none' }}>{error}</div>}
 
-        <button className="btn-primary" onClick={handleCreate} disabled={!name.trim() || loading}>
+        <button className="btn-primary" onClick={handleCreate} disabled={loading}>
           {loading ? '...' : '🚀 CREATE ROOM'}
         </button>
 
@@ -84,7 +87,7 @@ export default function HomeScreen() {
             onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
             maxLength={4}
           />
-          <button className="btn-secondary" onClick={handleJoin} disabled={!name.trim() || !joinCode.trim() || loading}>
+          <button className="btn-secondary" onClick={handleJoin} disabled={loading}>
             JOIN
           </button>
         </div>

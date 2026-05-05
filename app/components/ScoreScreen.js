@@ -3,9 +3,15 @@
 import { useGameStore } from '../hooks/useGameState';
 
 export default function ScoreScreen() {
-  const { scores, reset, roomCode } = useGameStore();
+  const { scores, reset, roomCode, endReason } = useGameStore();
 
   if (!scores) return <div>Calculating scores...</div>;
+
+  const banner =
+    endReason === 'victory' ? { text: '🏆 VICTORY — You hit the exit target!', cls: 'victory' }
+    : endReason === 'bankruptcy' ? { text: '💸 BANKRUPT — Burned through all your runway', cls: 'bankrupt' }
+    : endReason === 'critical_failure' ? { text: '🔥 MELTDOWN — Errors hit critical', cls: 'bankrupt' }
+    : null;
 
   const handlePlayAgain = () => {
     // The host should ideally restart the room, but for now we'll just reset client state
@@ -18,6 +24,7 @@ export default function ScoreScreen() {
     <div className="score-screen">
       <div className="score-card">
         <h1>Round Complete!</h1>
+        {banner && <div className={`end-banner ${banner.cls}`}>{banner.text}</div>}
         <div className="final-grade grade-animation">
           {scores.grade}
         </div>

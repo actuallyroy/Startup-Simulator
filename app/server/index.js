@@ -40,11 +40,18 @@ app.prepare().then(() => {
     });
 
     socket.on('room:join', ({ roomCode, playerName }, cb) => {
-      const result = joinRoom(roomCode.toUpperCase(), socket.id, playerName);
+      const code = roomCode.toUpperCase();
+      const result = joinRoom(code, socket.id, playerName);
       if (result.error) return cb({ success: false, error: result.error });
-      socket.join(roomCode.toUpperCase());
-      io.to(roomCode.toUpperCase()).emit('room:update', sanitizeRoom(result.room));
-      cb({ success: true, roomCode: roomCode.toUpperCase(), room: sanitizeRoom(result.room) });
+      socket.join(code);
+      io.to(code).emit('room:update', sanitizeRoom(result.room));
+      // Mid-game: jump them straight into the playing screen with a fresh
+      // state push so the HUD/world appear immediately.
+      if (result.midGame) {
+        socket.emit('game:start', { roomCode: code });
+        if (result.room.engine) result.room.engine.broadcastState();
+      }
+      cb({ success: true, roomCode: code, room: sanitizeRoom(result.room), midGame: !!result.midGame });
     });
 
     socket.on('room:selectRole', ({ roomCode, roleId }, cb) => {
