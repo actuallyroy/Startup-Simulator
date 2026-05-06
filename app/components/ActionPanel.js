@@ -203,14 +203,15 @@ export default function ActionPanel() {
           }
 
           // Effect chips, sorted: positives first, negatives last.
-          // Beneficial outcomes get scaled by role bonus and active synergy
-          // — so a Frontend dev sees Mobile Optimize as ≤+150 not ≤+100.
+          // Beneficial outcomes get scaled by role bonus, active synergy,
+          // and diminishing returns from repeated team-wide use.
           const roleMul = hasBonus ? 1.5 : 1.0;
+          const repeatMul = action.maxUses ? 1.0 : Math.max(0.2, 1 - (used) * 0.18);
           const effectChips = Object.entries(action.effects || {})
             .map(([m, d]) => {
               const inverted = m === 'errors' || m === 'latency';
               const beneficial = inverted ? d < 0 : d > 0;
-              const scaled = beneficial ? Math.round(d * roleMul * synergyMul) : d;
+              const scaled = beneficial ? Math.round(d * roleMul * synergyMul * repeatMul) : d;
               return { metric: m, ...formatEffect(m, scaled) };
             })
             .filter(Boolean)
@@ -243,6 +244,11 @@ export default function ActionPanel() {
                     </span>
                   ))}
                 </div>
+                {!action.maxUses && repeatMul < 0.95 && !locked && (
+                  <span className="repeat-badge" title={`Used ${used}× by team — repeat penalty`}>
+                    ×{repeatMul.toFixed(2)} ({used}×)
+                  </span>
+                )}
                 {synergyMul > 1.05 && !locked && (
                   <span className="synergy-badge" title={`Synergy from: ${matchedBuffs.join(', ')}`}>
                     🔗 ×{synergyMul.toFixed(2)}

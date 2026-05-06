@@ -52,6 +52,16 @@ export function applyAction(state, actionId, playerId, playerRole, upgrades, mot
   else if (roll < successChance)   { result = 'success';  posMul = 1.0 * roleMul; negMul = 1.0; }
   else                             { result = 'failure';  posMul = 0.3 * roleMul; negMul = 1.5; }
 
+  // Diminishing returns on repeats. Team-wide usage count is the input —
+  // spamming the same action drives effective gains down while costs hold.
+  // Skipped for actions with explicit maxUses (already capped) and for
+  // foundation actions (we want devops/backend grinding to remain useful).
+  let repeatMul = 1.0;
+  if (!action.maxUses) {
+    const prevUses = state.actionCounts?.[actionId] || 0;
+    repeatMul = Math.max(0.2, 1 - prevUses * 0.18);
+  }
+
   // Synergy: if foundation buffs are active and this action declares
   // amplifiedBy entries that match, multiply positive deltas. Multiplicative
   // stacking, capped at 2.5× so a chain of buffs can't go infinite.
@@ -67,7 +77,7 @@ export function applyAction(state, actionId, playerId, playerRole, upgrades, mot
     }
     if (synergyMul > 2.5) synergyMul = 2.5;
   }
-  posMul *= synergyMul;
+  posMul *= synergyMul * repeatMul;
 
   const newMetrics = { ...state.metrics };
   for (const [metric, delta] of Object.entries(action.effects)) {
@@ -208,6 +218,28 @@ export function tickState(state, playerCount = 1, totalSalary = 0) {
     const happinessFactor = newMetrics.happiness / 100;
     const mult = state.revenueMultiplier || 1.0;
     const errorPenalty = newMetrics.errors * 0.4; // bugs cost real money
+    // ── Organic user growth ──
+    // Healthy product compounds: happy users refer friends, stable infra
+    // retains them, broken product churns them. Foundation buffs (devops/backend
+    // work) drive a measurable passive bump — that's how you justify those
+    // actions when launchpad-style spam isn't an option.
+    const errorPenaltyFactor = Math.max(0, 1 - newMetrics.errors / 100);
+    const latencyPenaltyFactor = Math.max(0.4, 1 - Math.min(newMetrics.latency, 500) / 500 * 0.6);
+    const buffs = state.activeBuffs || {};
+    const buffBonus =
+      (buffs.infra > state.tick ? 0.003 : 0) +
+      (buffs.cache > state.tick ? 0.002 : 0) +
+      (buffs.stable > state.tick ? 0.002 : 0) +
+      (buffs.monitor > state.tick ? 0.002 : 0) +
+      (buffs.tests > state.tick ? 0.001 : 0);
+    const growthRate = (0.005 + buffBonus) * happinessFactor * errorPenaltyFactor * latencyPenaltyFactor;
+    const flatTrickle = newMetrics.users > 0 ? Math.round(3 * happinessFactor * errorPenaltyFactor) : 0;
+    const organicGrowth = Math.max(0, Math.round(newMetrics.users * growthRate) + flatTrickle);
+    if (organicGrowth > 0) {
+      newMetrics.users = Math.min(METRICS_CONFIG.users.max, newMetrics.users + organicGrowth);
+    }
+    state = { ...state, lastOrganicGrowth: organicGrowth };
+
     income = Math.max(0, Math.round(newMetrics.users * arpu * happinessFactor * mult - errorPenalty));
     // Burn = fixed overhead + salaries + server cost (linear + quadratic in users).
     // The quadratic term means doubling users more than doubles infra cost.

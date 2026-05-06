@@ -12,6 +12,7 @@ export default function MetricsBar() {
   const winCondition = useGameStore((s) => s.winCondition);
   const lastBurn = useGameStore((s) => s.lastBurn);
   const lastIncome = useGameStore((s) => s.lastIncome);
+  const lastOrganicGrowth = useGameStore((s) => s.lastOrganicGrowth);
   const arpu = useGameStore((s) => s.arpu);
 
   const prevMetrics = useRef(metrics);
@@ -103,6 +104,11 @@ export default function MetricsBar() {
                   <span className="cashflow-badge" title={`ARPU: $${arpu.toFixed(2)}/user/tick`}>
                     {lastIncome > 0 && <span className="cf-income">+${lastIncome}</span>}
                     {lastBurn > 0 && <span className="cf-burn">−${lastBurn}</span>}
+                  </span>
+                )}
+                {key === 'users' && lastOrganicGrowth > 0 && (
+                  <span className="cashflow-badge" title="Passive user growth this tick (driven by happiness, low errors, foundation buffs)">
+                    <span className="cf-income">+{lastOrganicGrowth}/T</span>
                   </span>
                 )}
               </span>

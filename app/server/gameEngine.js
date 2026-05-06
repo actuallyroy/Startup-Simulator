@@ -283,8 +283,9 @@ export class GameEngine {
     player.busyTotal = duration;
     player.actionsUsed = (player.actionsUsed || 0) + 1;
 
-    // Increment team-wide use count for this action
-    if (action.maxUses) {
+    // Increment team-wide use count for this action — used both for maxUses
+    // caps and for diminishing-returns scaling on repeat use.
+    {
       const counts = { ...(this.state.actionCounts || {}) };
       counts[actionId] = (counts[actionId] || 0) + 1;
       this.state = { ...this.state, actionCounts: counts };
@@ -559,6 +560,7 @@ export class GameEngine {
       gameType: this.state.gameType, gameSubtype: this.state.gameSubtype,
       lastBurn: this.state.lastBurn || 0,
       lastIncome: this.state.lastIncome || 0,
+      lastOrganicGrowth: this.state.lastOrganicGrowth || 0,
       arpu: this.state.arpu || 0,
       preparationPoints: this.state.preparationPoints || 0,
       fundingRaised: this.state.fundingRaised || 0,
